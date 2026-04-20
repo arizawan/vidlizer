@@ -192,6 +192,25 @@ Apply all the same rules: Zero Compression, adapt to content type, capture all t
 Output: Provide ONLY a valid JSON object with the `flow` array continuing from step {step_offset}. No prose, no code fences."""
 
 
+PROMPT_IMAGE = """Role: Act as an expert Image Analyst.
+
+Task: Analyze this single image and describe it completely in exactly ONE step.
+
+JSON Schema:
+Return a JSON object with a `flow` array containing exactly one element:
+- step: 1
+- phase: "Image Analysis"
+- scene: Full description of what is visible — setting, environment, layout.
+- subjects: All people, objects, UI elements, or entities present.
+- action: Any activity, state, or interaction evident in the image.
+- text_visible: All readable text (labels, captions, code, titles, overlays). Empty string if none.
+- context: Inferred purpose, brand, topic, or background information.
+- observations: Notable details — quality, errors, emotions, anomalies, key facts.
+- next_scene: null
+
+Output: Provide ONLY a valid JSON object with the `flow` array containing exactly one step. No prose, no code fences."""
+
+
 class ImageLimitError(RuntimeError):
     """Raised when the model rejects the request due to too many images."""
     pass
@@ -320,6 +339,7 @@ def call_openrouter(
     batch_size: int,
     tracker: CostTracker | None = None,
     _depth: int = 0,
+    is_image: bool = False,
 ) -> dict:
     """Send frames to OpenRouter. Auto-retries with batching on image-limit errors."""
     if _depth > _MAX_RECURSION_DEPTH:
@@ -331,7 +351,7 @@ def call_openrouter(
         tracker = CostTracker()
     if batch_size <= 0 or len(frames) <= batch_size:
         # Single request
-        content = [{"type": "text", "text": PROMPT}]
+        content = [{"type": "text", "text": PROMPT_IMAGE if is_image else PROMPT}]
         content.extend(encode_frame(f) for f in frames)
         tracker.batches_total = 1
         try:
@@ -535,7 +555,7 @@ def run(
         data = None
         for attempt in range(1, 4):
             try:
-                data = call_openrouter(api_key, model, frames, timeout, v, batch_size, tracker)
+                data = call_openrouter(api_key, model, frames, timeout, v, batch_size, tracker, is_image=is_image)
                 break
             except CostCapExceeded as e:
                 _err(str(e))
