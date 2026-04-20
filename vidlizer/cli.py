@@ -46,10 +46,9 @@ def _prompt_model() -> str:
     try:
         import questionary
         result = questionary.autocomplete(
-            "Select model (type to search):",
+            "Select model (type to search, ↑↓ navigate, ↵ select):",
             choices=choices,
             match_middle=True,
-            instruction="(type to filter  ↑↓ navigate  ↵ select)",
         ).ask()
         if result is None:
             raise KeyboardInterrupt
