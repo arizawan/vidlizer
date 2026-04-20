@@ -236,13 +236,13 @@ def interactive_args(video: Path | None) -> dict:
 
     if advanced:
         args["scene"] = _prompt_float("Scene-change threshold (0..1, lower=more frames)", float(os.getenv("SCENE_THRESHOLD", "0.1")))
-        args["min_interval"] = _prompt_float("Min seconds between frames (fallback interval)", float(os.getenv("MIN_INTERVAL", "5")))
+        args["min_interval"] = _prompt_float("Min seconds between frames (fallback interval)", float(os.getenv("MIN_INTERVAL", "2")))
         args["scale"] = _prompt_int("Frame width in pixels", int(os.getenv("FRAME_WIDTH", "512")))
         args["max_frames"] = _prompt_int("Max frames to send", int(os.getenv("MAX_FRAMES", "60")))
         args["batch_size"] = _prompt_int("Batch size (0=auto, use 8 for Nvidia free)", int(os.getenv("BATCH_SIZE", "0")))
     else:
         args["scene"] = float(os.getenv("SCENE_THRESHOLD", "0.1"))
-        args["min_interval"] = float(os.getenv("MIN_INTERVAL", "5"))
+        args["min_interval"] = float(os.getenv("MIN_INTERVAL", "2"))
         args["scale"] = int(os.getenv("FRAME_WIDTH", "512"))
         args["max_frames"] = int(os.getenv("MAX_FRAMES", "60"))
         args["batch_size"] = int(os.getenv("BATCH_SIZE", "0"))

@@ -455,7 +455,7 @@ def run(
     output: Path,
     model: str,
     scene: float = 0.1,
-    min_interval: float = 5.0,
+    min_interval: float = 2.0,
     fps: float | None = None,
     scale: int = 512,
     max_frames: int = 60,
