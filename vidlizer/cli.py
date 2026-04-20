@@ -308,6 +308,9 @@ def _main() -> int:
 
     _print_banner()
 
+    from vidlizer.bootstrap import run_checks
+    run_checks(_console)
+
     # Handle URL input — download to a managed temp dir before interactive_args
     video_raw = cli.video
     url_ctx: contextlib.AbstractContextManager = contextlib.nullcontext(None)

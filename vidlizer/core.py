@@ -675,11 +675,9 @@ def run(
         from vidlizer.transcribe import has_audio, is_available, transcribe
         if has_audio(video):
             if not is_available():
-                _warn(
-                    "audio detected — install [bold]faster-whisper[/bold] for automatic transcription  "
-                    "[dim](pip install vidlizer\\[transcribe])[/dim]"
-                )
-            else:
+                from vidlizer.bootstrap import ensure_faster_whisper
+                ensure_faster_whisper(_console)
+            if is_available():
                 with _console.status("[dim]transcribing audio…[/dim]", spinner="dots2"):
                     segments = transcribe(video)
                 if segments:
