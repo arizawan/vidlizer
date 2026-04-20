@@ -17,7 +17,11 @@ pip install -e .
 cp env.sample .env         # then paste your OpenRouter key into .env
 ```
 
-Requires `ffmpeg` on `PATH`.
+Requires `ffmpeg` on `PATH`. For PDF support add the optional extra (57 MB):
+
+```bash
+pip install -e ".[pdf]"
+```
 
 ## Use
 
