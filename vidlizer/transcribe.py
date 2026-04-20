@@ -10,6 +10,16 @@ import tempfile
 from pathlib import Path
 
 
+def has_audio(video: Path) -> bool:
+    """Return True if the video file contains an audio stream."""
+    r = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "a:0",
+         "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(video)],
+        capture_output=True, text=True,
+    )
+    return bool(r.stdout.strip())
+
+
 def _extract_audio(video: Path, out: Path) -> bool:
     r = subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error",

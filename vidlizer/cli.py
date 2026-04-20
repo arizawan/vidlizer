@@ -91,8 +91,6 @@ def _print_config(args: dict) -> None:
         frames_row += f"  ·  [yellow]{s}s → {e}s[/yellow]"
     t.add_row("frames", frames_row)
     t.add_row("cost cap", f"[yellow]${args['max_cost']:.2f}[/yellow]  [dim](abort if exceeded)[/dim]")
-    if args.get("with_transcript"):
-        t.add_row("transcript", "[cyan]enabled[/cyan]")
     _console.print(Panel(t, title="[dim]config[/dim]", border_style="dim", padding=(0, 1)))
     _console.print()
 
@@ -264,7 +262,6 @@ def interactive_args(video: Path | None) -> dict:
     args["start"] = None
     args["end"] = None
     args["dedup_threshold"] = 8
-    args["with_transcript"] = False
 
     return args
 
@@ -303,8 +300,8 @@ def _main() -> int:
                    help="Analyze from this timestamp in seconds (analyze_moment)")
     p.add_argument("--end", type=float, default=None,
                    help="Analyze up to this timestamp in seconds (analyze_moment)")
-    p.add_argument("--transcript", action="store_true", dest="with_transcript",
-                   help="Transcribe audio (requires: pip install faster-whisper)")
+    p.add_argument("--no-transcript", action="store_true", dest="no_transcript",
+                   help="Skip audio transcription even if faster-whisper is installed")
     p.add_argument("--dedup-threshold", type=int, default=None, dest="dedup_threshold",
                    help="Perceptual dedup Hamming threshold (default 8, 0=off)")
     cli = p.parse_args()
@@ -351,7 +348,6 @@ def _main() -> int:
         if cli.max_cost is not None:         iargs["max_cost"] = cli.max_cost
         if cli.start is not None:            iargs["start"] = cli.start
         if cli.end is not None:              iargs["end"] = cli.end
-        if cli.with_transcript:              iargs["with_transcript"] = True
         if cli.dedup_threshold is not None:  iargs["dedup_threshold"] = cli.dedup_threshold
         if cli.verbose:                      iargs["verbose"] = True
 

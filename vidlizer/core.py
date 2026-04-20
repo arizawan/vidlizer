@@ -532,7 +532,6 @@ def run(
     start: float | None = None,
     end: float | None = None,
     dedup_threshold: int = _DEDUP_DEFAULT,
-    with_transcript: bool = False,
 ) -> int:
     global _live_models
     v = verbose
@@ -614,7 +613,7 @@ def run(
             "model": model, "max_frames": max_frames, "scene": scene,
             "min_interval": min_interval, "fps": str(fps), "scale": scale,
             "batch_size": batch_size, "start": str(start), "end": str(end),
-            "dedup": dedup_threshold, "transcript": with_transcript,
+            "dedup": dedup_threshold,
         }
         cached = _cache.get(video if not is_image else video, cache_params)
         if cached is not None:
@@ -671,20 +670,21 @@ def run(
     if steps == 0:
         _warn("model returned 0 steps — check --verbose output for clues")
 
-    # Transcription (video only, optional dep)
-    if with_transcript and not is_image and not is_pdf:
-        from vidlizer.transcribe import transcribe, is_available
-        if not is_available():
-            _warn("faster-whisper not installed — skipping transcript  "
-                  "[dim](pip install vidlizer[transcribe])[/dim]")
-        else:
-            with _console.status("[dim]transcribing audio…[/dim]", spinner="dots2"):
-                segments = transcribe(video)
-            if segments:
-                data["transcript"] = segments
-                _info(f"transcript: [bold]{len(segments)} segments[/bold]")
+    # Transcription — auto-runs for any video with an audio track
+    if not is_image and not is_pdf:
+        from vidlizer.transcribe import has_audio, is_available, transcribe
+        if has_audio(video):
+            if not is_available():
+                _warn(
+                    "audio detected — install [bold]faster-whisper[/bold] for automatic transcription  "
+                    "[dim](pip install vidlizer\\[transcribe])[/dim]"
+                )
             else:
-                _warn("transcription produced no output")
+                with _console.status("[dim]transcribing audio…[/dim]", spinner="dots2"):
+                    segments = transcribe(video)
+                if segments:
+                    data["transcript"] = segments
+                    _info(f"transcript: [bold]{len(segments)} segments[/bold]")
 
     _cache.put(video, cache_params, data)
     output.write_text(json.dumps(data, indent=2, ensure_ascii=False))
