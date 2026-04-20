@@ -40,7 +40,7 @@ def download(url: str, out_dir: Path) -> Path:
     YDL = _ydl()
     tmpl = str(out_dir / "%(id)s.%(ext)s")
     opts = {
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "format": "bestvideo+bestaudio/best",
         "merge_output_format": "mp4",
         "outtmpl": tmpl,
         "quiet": True,
