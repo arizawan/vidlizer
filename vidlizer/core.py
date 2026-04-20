@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -82,9 +83,12 @@ Observational Rules:
 - Issues: Flag errors, anomalies, quality problems, or anything unexpected.
 - Persistence: Track any ongoing state — timer, score, progress bar, speaker identity, topic, brand, etc.
 
+Frames are labelled [t=Xs] where X is the timestamp in seconds. Use these to fill timestamp_s.
+
 JSON Schema:
 Produce a single JSON object with a `flow` array. Each element MUST include:
 - step: Sequential integer.
+- timestamp_s: Approximate time in seconds when this step begins (from the nearest [t=Xs] label). null if no labels present.
 - phase: Logical section (e.g. "Introduction", "Demo", "Action", "Conclusion", "Navigation", "Dialogue").
 - scene: What is currently visible — the setting, screen, environment, or context.
 - subjects: Key people, objects, UI elements, or entities present.
@@ -144,6 +148,9 @@ def extract_frames(
         )
         mode_desc = f"scene>{scene_threshold} or every {min_interval}s"
 
+    ts_file = out_dir / ".timestamps.txt"
+    vf_with_ts = vf + f",metadata=print:file={ts_file}"
+
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "warning" if verbose else "error",
         "-y", "-i", str(video),
@@ -153,7 +160,7 @@ def extract_frames(
     if end is not None:
         cmd += ["-to", str(end)]
     cmd += [
-        "-vf", vf,
+        "-vf", vf_with_ts,
         "-vsync", "vfr",
         "-frames:v", str(max_frames),
         "-q:v", "3",
@@ -168,6 +175,13 @@ def extract_frames(
         subprocess.run(cmd, check=True)
 
     frames = sorted(out_dir.glob("f_*.jpg"))
+
+    # Write {filename: timestamp_s} sidecar for downstream transcript merging
+    if ts_file.exists():
+        raw_times = re.findall(r'pts_time:([\d.]+)', ts_file.read_text())
+        ts_map = {frames[i].name: float(raw_times[i]) for i in range(min(len(frames), len(raw_times)))}
+        (out_dir / ".timestamps.json").write_text(json.dumps(ts_map))
+
     if verbose:
         total_kb = sum(f.stat().st_size for f in frames) / 1024
         _dbg(f"[frames] extracted {len(frames)} frames, total {total_kb:.1f} KB")
@@ -377,6 +391,7 @@ def call_openrouter(
     tracker: CostTracker | None = None,
     _depth: int = 0,
     is_image: bool = False,
+    timestamps: list[float] | None = None,
 ) -> dict:
     """Send frames to OpenRouter. Auto-retries with batching on image-limit errors."""
     if _depth > _MAX_RECURSION_DEPTH:
@@ -386,10 +401,17 @@ def call_openrouter(
         )
     if tracker is None:
         tracker = CostTracker()
+    def _build_content(prompt: str, chunk: list[Path], ts: list[float] | None) -> list[dict]:
+        parts: list[dict] = [{"type": "text", "text": prompt}]
+        for i, f in enumerate(chunk):
+            if ts and i < len(ts):
+                parts.append({"type": "text", "text": f"[t={ts[i]:.1f}s]"})
+            parts.append(encode_frame(f))
+        return parts
+
     if batch_size <= 0 or len(frames) <= batch_size:
         # Single request
-        content = [{"type": "text", "text": PROMPT_IMAGE if is_image else PROMPT}]
-        content.extend(encode_frame(f) for f in frames)
+        content = _build_content(PROMPT_IMAGE if is_image else PROMPT, frames, timestamps)
         tracker.batches_total = 1
         try:
             body = _post(api_key, model, {
@@ -407,7 +429,7 @@ def call_openrouter(
         except ImageLimitError:
             auto_batch = max(1, len(frames) // 5)
             _warn(f"image limit hit — auto-batching at [bold]{auto_batch}[/bold] frames/request")
-            return call_openrouter(api_key, model, frames, timeout, verbose, auto_batch, tracker, _depth + 1)
+            return call_openrouter(api_key, model, frames, timeout, verbose, auto_batch, tracker, _depth + 1, timestamps=timestamps)
 
     # Batched: merge flow arrays across chunks
     all_steps: list[dict] = []
@@ -423,12 +445,12 @@ def call_openrouter(
         if verbose:
             _dbg(f"[batch] chunk {i+1}: frames {chunk_start+1}–{chunk_start+len(chunk)} (step offset {step_offset})")
 
+        chunk_ts = timestamps[chunk_start:chunk_start + batch_size] if timestamps else None
         prompt_text = PROMPT if is_first else PROMPT_CONTINUE.format(
             step_offset=step_offset,
             phase_context=phase_context,
         )
-        content = [{"type": "text", "text": prompt_text}]
-        content.extend(encode_frame(f) for f in chunk)
+        content = _build_content(prompt_text, chunk, chunk_ts)
 
         try:
             body = _post(api_key, model, {
@@ -440,7 +462,7 @@ def call_openrouter(
         except ImageLimitError:
             smaller = max(1, len(chunk) // 2)
             _warn(f"chunk {i+1} hit image limit — re-splitting to batch_size={smaller}")
-            sub = call_openrouter(api_key, model, chunk, timeout, verbose, smaller, tracker, _depth + 1)
+            sub = call_openrouter(api_key, model, chunk, timeout, verbose, smaller, tracker, _depth + 1, timestamps=chunk_ts)
             for j, step in enumerate(sub.get("flow", [])):
                 step["step"] = step_offset + j
             all_steps.extend(sub.get("flow", []))
@@ -488,6 +510,28 @@ def parse_json(text: str | dict) -> dict:
             text = text[4:]
         text = text.rsplit("```", 1)[0]
     return json.loads(text.strip())
+
+
+def _merge_transcript(flow: list[dict], segments: list[dict]) -> None:
+    """Inject 'speech' into each flow step based on overlapping transcript segments."""
+    n = len(flow)
+    for i, step in enumerate(flow):
+        try:
+            t_start = float(step.get("timestamp_s") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        t_end = float("inf")
+        if i + 1 < n:
+            try:
+                t_end = float(flow[i + 1].get("timestamp_s") or float("inf"))
+            except (TypeError, ValueError):
+                pass
+        speech = " ".join(
+            s["text"] for s in segments
+            if s["end"] > t_start and s["start"] < t_end
+        ).strip()
+        if speech:
+            step["speech"] = speech
 
 
 _PREVIEW_MAX_LINES = 24
@@ -576,6 +620,7 @@ def run(
     tmp_ctx = contextlib.nullcontext(None) if is_image else tempfile.TemporaryDirectory(prefix="vidframes_")
 
     with tmp_ctx as tmp:
+        frame_timestamps: list[float] | None = None
         if is_image:
             frames: list[Path] = [video]
         elif is_pdf:
@@ -596,6 +641,17 @@ def run(
             frames = dedup_frames(frames, dedup_threshold)
             if len(frames) < before:
                 _info(f"dedup: [bold]{before - len(frames)}[/bold] duplicate frames removed ({len(frames)} remain)")
+
+            # Load per-frame timestamps written by extract_frames
+            ts_json = tmp_path / ".timestamps.json"
+            if ts_json.exists():
+                try:
+                    ts_map = json.loads(ts_json.read_text())
+                    frame_timestamps = [ts_map[f.name] for f in frames if f.name in ts_map]
+                    if len(frame_timestamps) != len(frames):
+                        frame_timestamps = None
+                except Exception:
+                    frame_timestamps = None
 
         if is_image:
             label = "image"
@@ -631,7 +687,7 @@ def run(
             """Run up to 3 attempts. Returns (data, rc) where rc=-1 means exhausted."""
             for attempt in range(1, 4):
                 try:
-                    return call_openrouter(api_key, m, frames, timeout, v, batch_size, trk, is_image=is_image), 0
+                    return call_openrouter(api_key, m, frames, timeout, v, batch_size, trk, is_image=is_image, timestamps=frame_timestamps), 0
                 except CostCapExceeded as e:
                     _err(str(e))
                     _warn("partial run — no output written. Raise MAX_COST_USD or use a cheaper model.")
@@ -682,7 +738,8 @@ def run(
                     segments = transcribe(video)
                 if segments:
                     data["transcript"] = segments
-                    _info(f"transcript: [bold]{len(segments)} segments[/bold]")
+                    _merge_transcript(data["flow"], segments)
+                    _info(f"transcript: [bold]{len(segments)} segments[/bold]  (merged into flow steps)")
 
     _cache.put(video, cache_params, data)
     output.write_text(json.dumps(data, indent=2, ensure_ascii=False))
