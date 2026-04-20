@@ -167,6 +167,7 @@ def extract_frames(
 
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".tif"}
+_PDF_EXTS = {".pdf"}
 
 _MIME = {
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -174,6 +175,32 @@ _MIME = {
     ".webp": "image/webp", ".bmp": "image/bmp",
     ".tiff": "image/tiff", ".tif": "image/tiff",
 }
+
+
+def pdf_to_frames(pdf: Path, out_dir: Path, scale: int, max_frames: int) -> list[Path]:
+    """Render PDF pages to JPEG images using pymupdf."""
+    try:
+        import fitz  # pymupdf
+    except ImportError:
+        raise RuntimeError("pymupdf not installed — run: pip install pymupdf")
+
+    doc = fitz.open(str(pdf))
+    total = len(doc)
+    n = min(total, max_frames)
+    _info(f"PDF: [bold]{total} pages[/bold]  (rendering {n})")
+
+    zoom = scale / 595.0  # approximate A4 width in pts
+    mat = fitz.Matrix(zoom, zoom)
+
+    paths: list[Path] = []
+    for i in range(n):
+        pix = doc[i].get_pixmap(matrix=mat, alpha=False)
+        out = out_dir / f"p_{i+1:05d}.jpg"
+        pix.save(str(out))
+        paths.append(out)
+
+    doc.close()
+    return paths
 
 
 def encode_frame(path: Path) -> dict:
@@ -522,19 +549,28 @@ def run(
     import contextlib
 
     is_image = video.suffix.lower() in _IMAGE_EXTS
+    is_pdf = video.suffix.lower() in _PDF_EXTS
 
     if is_image:
         _info(f"image input: [bold]{video.name}[/bold]  [dim]({video.stat().st_size // 1024} KB)[/dim]")
+    elif is_pdf:
+        _info(f"PDF input: [bold]{video.name}[/bold]  [dim]({video.stat().st_size // 1024} KB)[/dim]")
     else:
         from vidlizer.preflight import show_preflight
         show_preflight(video, model, min_interval, max_frames, _live_models)
 
-    # nullcontext for images (file is permanent); TemporaryDirectory for videos
+    # nullcontext for images (file is permanent); TemporaryDirectory for videos/PDFs
     tmp_ctx = contextlib.nullcontext(None) if is_image else tempfile.TemporaryDirectory(prefix="vidframes_")
 
     with tmp_ctx as tmp:
         if is_image:
             frames: list[Path] = [video]
+        elif is_pdf:
+            tmp_path = Path(tmp)  # type: ignore[arg-type]
+            frames = pdf_to_frames(video, tmp_path, scale, max_frames)
+            if not frames:
+                _err("no pages extracted from PDF")
+                return 1
         else:
             tmp_path = Path(tmp)  # type: ignore[arg-type]
             if v:
@@ -544,7 +580,12 @@ def run(
                 _err("no frames extracted — try --fps 0.5 or lower --scene threshold")
                 return 1
 
-        label = "image" if is_image else f"{len(frames)} frames"
+        if is_image:
+            label = "image"
+        elif is_pdf:
+            label = f"{len(frames)} pages"
+        else:
+            label = f"{len(frames)} frames"
         _info(
             f"[bold]{label}[/bold]  [dim]→[/dim]  [magenta]{model}[/magenta]  "
             f"[dim](batch={batch_size or 'auto'}, output: {output})[/dim]"

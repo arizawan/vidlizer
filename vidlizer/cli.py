@@ -155,7 +155,7 @@ def _prompt_int(label: str, default: int) -> int:
 
 _MEDIA_EXTS = (
     "*.mp4 *.mov *.avi *.mkv *.webm *.m4v *.flv *.wmv *.ts *.mts *.mpg *.mpeg "
-    "*.jpg *.jpeg *.png *.gif *.webp *.bmp *.tiff *.tif"
+    "*.jpg *.jpeg *.png *.gif *.webp *.bmp *.tiff *.tif *.pdf"
 )
 
 
