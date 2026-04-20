@@ -166,9 +166,20 @@ def extract_frames(
     return frames
 
 
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".tif"}
+
+_MIME = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".png": "image/png",  ".gif": "image/gif",
+    ".webp": "image/webp", ".bmp": "image/bmp",
+    ".tiff": "image/tiff", ".tif": "image/tiff",
+}
+
+
 def encode_frame(path: Path) -> dict:
     b64 = base64.b64encode(path.read_bytes()).decode()
-    return {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+    mime = _MIME.get(path.suffix.lower(), "image/jpeg")
+    return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
 
 
 PROMPT_CONTINUE = """Role: Act as an expert Video Analyst.
@@ -488,22 +499,34 @@ def run(
               f"(${inp_rate:.2f}/M input, ${out_rate:.2f}/M output). "
               f"Cost cap: [bold]${max_cost:.2f}[/bold]")
 
-    # Pre-run estimate panel
-    from vidlizer.preflight import show_preflight
-    show_preflight(video, model, min_interval, max_frames, _live_models)
+    import contextlib
 
-    with tempfile.TemporaryDirectory(prefix="vidframes_") as tmp:
-        tmp_path = Path(tmp)
-        if v:
-            _dbg(f"[debug] temp dir: {tmp_path}")
+    is_image = video.suffix.lower() in _IMAGE_EXTS
 
-        frames = extract_frames(video, tmp_path, scale, max_frames, scene, fps, min_interval, v)
-        if not frames:
-            _err("no frames extracted — try --fps 0.5 or lower --scene threshold")
-            return 1
+    if is_image:
+        _info(f"image input: [bold]{video.name}[/bold]  [dim]({video.stat().st_size // 1024} KB)[/dim]")
+    else:
+        from vidlizer.preflight import show_preflight
+        show_preflight(video, model, min_interval, max_frames, _live_models)
 
+    # nullcontext for images (file is permanent); TemporaryDirectory for videos
+    tmp_ctx = contextlib.nullcontext(None) if is_image else tempfile.TemporaryDirectory(prefix="vidframes_")
+
+    with tmp_ctx as tmp:
+        if is_image:
+            frames: list[Path] = [video]
+        else:
+            tmp_path = Path(tmp)  # type: ignore[arg-type]
+            if v:
+                _dbg(f"[debug] temp dir: {tmp_path}")
+            frames = extract_frames(video, tmp_path, scale, max_frames, scene, fps, min_interval, v)
+            if not frames:
+                _err("no frames extracted — try --fps 0.5 or lower --scene threshold")
+                return 1
+
+        label = "image" if is_image else f"{len(frames)} frames"
         _info(
-            f"[bold]{len(frames)} frames[/bold]  [dim]→[/dim]  [magenta]{model}[/magenta]  "
+            f"[bold]{label}[/bold]  [dim]→[/dim]  [magenta]{model}[/magenta]  "
             f"[dim](batch={batch_size or 'auto'}, output: {output})[/dim]"
         )
         _console.print()

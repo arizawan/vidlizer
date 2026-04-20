@@ -153,8 +153,9 @@ def _prompt_int(label: str, default: int) -> int:
         return default
 
 
-_VIDEO_EXTS = (
-    "*.mp4 *.mov *.avi *.mkv *.webm *.m4v *.flv *.wmv *.ts *.mts *.mpg *.mpeg"
+_MEDIA_EXTS = (
+    "*.mp4 *.mov *.avi *.mkv *.webm *.m4v *.flv *.wmv *.ts *.mts *.mpg *.mpeg "
+    "*.jpg *.jpeg *.png *.gif *.webp *.bmp *.tiff *.tif"
 )
 
 
@@ -182,7 +183,7 @@ def _pick_file_gui() -> Path | None:
         root.wm_attributes("-topmost", True)
         path = filedialog.askopenfilename(
             title="Select video file",
-            filetypes=[("Video files", _VIDEO_EXTS), ("All files", "*.*")],
+            filetypes=[("Video & image files", _MEDIA_EXTS), ("All files", "*.*")],
         )
         root.destroy()
         return Path(path) if path else None
