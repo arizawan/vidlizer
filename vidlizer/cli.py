@@ -15,13 +15,28 @@ from rich.text import Text
 
 _console = Console(stderr=True, highlight=False)
 
-MODELS = [
-    ("google/gemini-2.5-flash",         "Recommended — fast, reliable, ~$0.001/run"),
-    ("google/gemini-2.5-flash-lite",    "Cheaper Gemini, slightly less accurate"),
-    ("nvidia/nemotron-nano-12b-v2-vl:free", "Free — slow, 10-image limit (auto-batched)"),
-    ("google/gemma-4-31b-it:free",      "Free — may rate-limit, strong quality"),
-    ("custom",                          "Enter a model slug manually"),
-]
+
+def _load_model_choices() -> list[tuple[str, str]]:
+    """Fetch live OpenRouter vision models and format as (id, description) tuples."""
+    from vidlizer.models import fetch_models, format_price_label
+    import os
+    try:
+        with _console.status("[dim]fetching models from OpenRouter…[/dim]", spinner="dots2"):
+            models = fetch_models(os.getenv("OPENROUTER_API_KEY"))
+        choices = []
+        for m in models:
+            price = format_price_label(m)
+            choices.append((m["id"], f"{m['name']}  [{price}]"))
+        choices.append(("custom", "Enter a model slug manually"))
+        return choices
+    except Exception:
+        return [
+            ("google/gemini-2.5-flash",         "Recommended — fast, reliable, ~$0.001/run"),
+            ("google/gemini-2.5-flash-lite",    "Cheaper Gemini, slightly less accurate"),
+            ("nvidia/nemotron-nano-12b-v2-vl:free", "Free — slow, 10-image limit (auto-batched)"),
+            ("google/gemma-4-31b-it:free",      "Free — may rate-limit, strong quality"),
+            ("custom",                          "Enter a model slug manually"),
+        ]
 
 
 def _print_banner() -> None:
@@ -146,7 +161,8 @@ def interactive_args(video: Path | None) -> dict:
     if env_model:
         args["model"] = env_model
     elif interactive:
-        choice = _prompt_select("Select model", MODELS)
+        model_choices = _load_model_choices()
+        choice = _prompt_select("Select model", model_choices)
         if choice == "custom":
             choice = _prompt_str("Model slug (e.g. openai/gpt-4o)")
         args["model"] = choice

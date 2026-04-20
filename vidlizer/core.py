@@ -17,23 +17,17 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from vidlizer.models import get_pricing
+
 _console = Console(stderr=True, highlight=False)
 
-# Pricing per million tokens (input, output). Add models here as needed.
-_PRICING: dict[str, tuple[float, float]] = {
-    "google/gemini-2.5-flash":       (0.15,  0.60),
-    "google/gemini-2.5-flash-lite":  (0.075, 0.30),
-    "google/gemini-2.5-pro":         (1.25,  10.0),
-    "openai/gpt-4o":                 (2.50,  10.0),
-    "openai/gpt-4o-mini":            (0.15,   0.60),
-}
+# Runtime-populated by run() after fetching live models
+_live_models: list[dict] = []
 
 
 def _model_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    for prefix, (inp, out) in _PRICING.items():
-        if model.startswith(prefix):
-            return (prompt_tokens * inp + completion_tokens * out) / 1_000_000
-    return 0.0
+    inp, out = get_pricing(model, _live_models or None)
+    return (prompt_tokens * inp + completion_tokens * out) / 1_000_000
 
 
 class CostCapExceeded(RuntimeError):
@@ -119,18 +113,6 @@ def _dbg(msg: str) -> None:
 def log(msg: str, verbose: bool = False, always: bool = False) -> None:
     if always or verbose:
         _console.print(msg, markup=False)
-
-
-def get_video_duration(video: Path, verbose: bool) -> float | None:
-    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-           "-of", "default=nw=1:nk=1", str(video)]
-    if verbose:
-        _dbg(f"[ffprobe] {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    try:
-        return float(result.stdout.strip())
-    except ValueError:
-        return None
 
 
 def extract_frames(
@@ -391,7 +373,7 @@ def parse_json(text: str | dict) -> dict:
     return json.loads(text.strip())
 
 
-_EXPENSIVE_PREFIXES = ("google/gemini-2.5-pro", "openai/gpt-4o", "anthropic/claude-3-opus", "anthropic/claude-3.5-sonnet")
+_EXPENSIVE_THRESHOLD_USD_PER_1M = 1.00  # warn if input price > this
 
 
 def run(
@@ -408,6 +390,7 @@ def run(
     verbose: bool = False,
     max_cost: float = 1.00,
 ) -> int:
+    global _live_models
     v = verbose
 
     if not shutil.which("ffmpeg"):
@@ -418,21 +401,24 @@ def run(
         _err("OPENROUTER_API_KEY missing (set in .env or export in shell)")
         return 2
 
+    # Fetch live model pricing (cached 1h)
+    from vidlizer.models import fetch_models
+    with _console.status("[dim]fetching model pricing…[/dim]", spinner="dots2"):
+        _live_models = fetch_models(api_key)
+
     # Money-bleeding guardrails
     if max_frames > 200:
         _warn(f"max_frames={max_frames} is high — runaway-cost risk. Capping to 200.")
         max_frames = 200
-    if any(model.startswith(p) for p in _EXPENSIVE_PREFIXES):
-        pricing = next(((i, o) for p, (i, o) in _PRICING.items() if model.startswith(p)), None)
-        if pricing:
-            _warn(f"[bold]{model}[/bold] is an expensive model "
-                  f"(${pricing[0]:.2f}/M input, ${pricing[1]:.2f}/M output). "
-                  f"Cost cap: [bold]${max_cost:.2f}[/bold]")
+    inp_rate, out_rate = get_pricing(model, _live_models)
+    if inp_rate > _EXPENSIVE_THRESHOLD_USD_PER_1M:
+        _warn(f"[bold]{model}[/bold] is an expensive model "
+              f"(${inp_rate:.2f}/M input, ${out_rate:.2f}/M output). "
+              f"Cost cap: [bold]${max_cost:.2f}[/bold]")
 
-    duration = get_video_duration(video, v)
-    if duration:
-        estimated = min(max_frames, int(duration / min_interval) + 1)
-        _info(f"video duration: [bold]{duration:.1f}s[/bold]  (~{estimated} frames at {min_interval}s interval)")
+    # Pre-run estimate panel
+    from vidlizer.preflight import show_preflight
+    show_preflight(video, model, min_interval, max_frames, _live_models)
 
     with tempfile.TemporaryDirectory(prefix="vidframes_") as tmp:
         tmp_path = Path(tmp)
@@ -446,9 +432,8 @@ def run(
 
         _info(
             f"[bold]{len(frames)} frames[/bold]  [dim]→[/dim]  [magenta]{model}[/magenta]  "
-            f"[dim](batch={batch_size or 'auto'})[/dim]"
+            f"[dim](batch={batch_size or 'auto'}, output: {output})[/dim]"
         )
-        _info(f"output: [dim]{output}[/dim]")
         _console.print()
 
         tracker = CostTracker(max_cost=max_cost)
