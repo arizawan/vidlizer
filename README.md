@@ -1,10 +1,23 @@
+<div align="center">
+
 # vidlizer
 
-> Feed it any video, image, or PDF — get back a structured JSON timeline of everything that happened.
+**Feed it any video, image, or PDF — get back a structured JSON timeline of everything that happened.**
 
-vidlizer extracts frames with ffmpeg, sends them to a vision model via [OpenRouter](https://openrouter.ai), and writes a `flow` array describing every scene, action, and visible text. For videos with audio it automatically transcribes speech and merges it into each step.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
+[![Tests](https://img.shields.io/badge/tests-82%20passing-brightgreen.svg)](#testing)
 
-```
+![demo](assets/demo.gif)
+
+</div>
+
+---
+
+vidlizer extracts frames with ffmpeg, sends them to a vision model via [OpenRouter](https://openrouter.ai), and writes a `flow` array describing every scene, action, and visible text. For videos with audio it automatically transcribes speech with Apple MLX Whisper and merges it into each step.
+
+```bash
 vidlizer demo.mp4
 vidlizer "https://youtube.com/watch?v=..."
 vidlizer screenshot.png
@@ -13,7 +26,7 @@ vidlizer document.pdf
 
 ---
 
-## Features
+## ✨ Features
 
 - **Any input** — local video, image (jpg/png/webp/…), PDF, or URL (YouTube, Loom, Vimeo, Twitter)
 - **Structured output** — `flow` array with scene, action, subjects, text, observations, timestamps
@@ -28,7 +41,7 @@ vidlizer document.pdf
 
 ---
 
-## Requirements
+## 📦 Requirements
 
 - macOS (Apple Silicon recommended for transcription speed)
 - Python 3.10+
@@ -38,7 +51,7 @@ vidlizer document.pdf
 
 ---
 
-## Install
+## 🚀 Install
 
 ```bash
 git clone https://github.com/arizawan/vidlizer.git
@@ -50,7 +63,7 @@ cp env.sample .env        # paste your OpenRouter key
 
 ---
 
-## Quick start
+## ⚡ Quick start
 
 ```bash
 # Analyze a local video
@@ -76,7 +89,7 @@ Run with no arguments to get an interactive file picker and model selector.
 
 ---
 
-## Output
+## 📄 Output
 
 Output goes to `<normalized-name>.analysis.json` by default, or pass `-o path.json`.
 
@@ -121,7 +134,7 @@ Output goes to `<normalized-name>.analysis.json` by default, or pass `-o path.js
 
 ---
 
-## Models
+## 🤖 Models
 
 Models are fetched live from OpenRouter with current pricing. Seven curated defaults:
 
@@ -141,9 +154,10 @@ Override via env var: `OPENROUTER_MODEL=google/gemini-2.5-flash`
 
 ---
 
-## Transcription
+## 🎙️ Transcription
 
 For videos with an audio track, vidlizer automatically:
+
 1. Extracts a mono 16kHz WAV with ffmpeg
 2. Transcribes with **Apple MLX Whisper** (Neural Engine + GPU on M-series)
 3. Merges each transcript segment into the nearest flow step as `speech`
@@ -154,7 +168,7 @@ To opt out: `--no-transcript`
 
 ---
 
-## CLI reference
+## 🛠️ CLI reference
 
 ```
 vidlizer [video] [options]
@@ -182,7 +196,7 @@ options:
 
 ---
 
-## Environment variables
+## 🔧 Environment variables
 
 Copy `env.sample` to `.env` and fill in your key. All CLI flags can also be set here:
 
@@ -201,6 +215,27 @@ REQUEST_TIMEOUT=600
 
 ---
 
-## License
+## 🧪 Testing
+
+Fully automated test suite — **82 unit + integration tests, 3 e2e tests**.
+
+```bash
+make install-dev    # installs pytest, pytest-html, pytest-mock
+make test           # runs unit + integration (no network) → HTML report
+make test-e2e       # also runs YouTube download + full pipeline e2e
+```
+
+Reports land in `reports/test-report.html`. Tests cover:
+
+- Frame extraction (ffmpeg), perceptual dedup, cache TTL
+- Audio detection, transcript merge (no duplicates)
+- PDF → frames, image encoding, URL detection
+- Full pipeline with mocked OpenRouter (fake HTTP server)
+- Real CLI subprocess invocations against real media
+- Real YouTube download + full analysis (opt-in `-m e2e`)
+
+---
+
+## 📝 License
 
 MIT — see [LICENSE](LICENSE).
