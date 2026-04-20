@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import platform
+import re
 import subprocess
 import sys
 import tempfile
@@ -220,7 +221,8 @@ def interactive_args(video: Path | None) -> dict:
     args["video"] = video
 
     # --- Output path ---
-    default_output = video.with_suffix(video.suffix + ".analysis.json")
+    safe_stem = re.sub(r"[^a-z0-9]+", "-", video.stem.lower()).strip("-") or "output"
+    default_output = video.parent / f"{safe_stem}.analysis.json"
     if interactive:
         out_raw = _prompt_str("Output JSON path", str(default_output))
         args["output"] = Path(os.path.expanduser(out_raw))
