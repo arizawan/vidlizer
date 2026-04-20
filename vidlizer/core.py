@@ -424,20 +424,24 @@ def parse_json(text: str | dict) -> dict:
     return json.loads(text.strip())
 
 
-def _show_result_preview(data: dict, preview_steps: int = 3) -> None:
+_PREVIEW_MAX_LINES = 24
+
+
+def _show_result_preview(data: dict) -> None:
     steps = data.get("flow", [])
     n = len(steps)
     if n == 0:
         return
-    shown = min(preview_steps, n)
-    preview_str = json.dumps({"flow": steps[:shown]}, indent=2, ensure_ascii=False)
-    if n > shown:
-        # Trim closing brace and append a truncation hint
-        preview_str = preview_str.rstrip()[:-2].rstrip() + f",\n    // ... {n - shown} more steps\n  ]\n}}"
-    syntax = Syntax(preview_str, "json", theme="monokai", line_numbers=True, word_wrap=True)
+    preview_str = json.dumps({"flow": steps[:2]}, indent=2, ensure_ascii=False)
+    lines = preview_str.splitlines()
+    truncated = len(lines) > _PREVIEW_MAX_LINES
+    visible = "\n".join(lines[:_PREVIEW_MAX_LINES])
+    if truncated:
+        visible += f"\n  // … {len(lines) - _PREVIEW_MAX_LINES} more lines ({n} steps total)"
+    syntax = Syntax(visible, "json", theme="monokai", line_numbers=True, word_wrap=False)
     _console.print(Panel(
         syntax,
-        title=f"[dim]result preview  [white]{n} steps[/white][/dim]",
+        title=f"[dim]preview  [white]{n} steps[/white][/dim]",
         border_style="dim",
         padding=(0, 1),
     ))
