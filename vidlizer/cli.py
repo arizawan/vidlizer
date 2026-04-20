@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import platform
+import subprocess
 import sys
 from pathlib import Path
 
@@ -154,7 +156,21 @@ _VIDEO_EXTS = (
 
 
 def _pick_file_gui() -> Path | None:
-    """Open a native OS file-picker dialog. Returns None if unavailable."""
+    """Open a native OS file-picker dialog. Returns None if unavailable or cancelled."""
+    # macOS: use AppleScript — always available, no Python GUI deps needed
+    if platform.system() == "Darwin":
+        try:
+            r = subprocess.run(
+                ["osascript", "-e", 'POSIX path of (choose file with prompt "Select video file:")'],
+                capture_output=True, text=True, timeout=120,
+            )
+            if r.returncode == 0:
+                p = r.stdout.strip()
+                return Path(p) if p else None
+        except Exception:
+            pass
+
+    # Other platforms: tkinter fallback
     try:
         import tkinter as tk
         from tkinter import filedialog
@@ -163,10 +179,7 @@ def _pick_file_gui() -> Path | None:
         root.wm_attributes("-topmost", True)
         path = filedialog.askopenfilename(
             title="Select video file",
-            filetypes=[
-                ("Video files", _VIDEO_EXTS),
-                ("All files", "*.*"),
-            ],
+            filetypes=[("Video files", _VIDEO_EXTS), ("All files", "*.*")],
         )
         root.destroy()
         return Path(path) if path else None
