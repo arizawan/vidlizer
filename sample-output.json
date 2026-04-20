@@ -1,0 +1,200 @@
+{
+  "flow": [
+    {
+      "step": 1,
+      "phase": "Initial Run",
+      "page": "Quiz Screen",
+      "text_context": "Who is getting in first place?",
+      "input": "No input yet",
+      "screen_data": {
+        "timer_state": "27s",
+        "score_state": "125.86",
+        "media_status": "Black screen placeholder",
+        "ui_feedback": "Question displayed with timer and score",
+        "next_screen": "Quiz Complete"
+      }
+    },
+    {
+      "step": 2,
+      "phase": "Initial Run",
+      "page": "Quiz Complete",
+      "text_context": "Duel Complete! 147.06 points 7/7 correct",
+      "input": "Quiz submission",
+      "screen_data": {
+        "timer_state": "0s",
+        "score_state": "147.06",
+        "media_status": "None",
+        "ui_feedback": "Final score displayed with correctness",
+        "next_screen": "Question Review"
+      }
+    },
+    {
+      "step": 3,
+      "phase": "Question Review",
+      "page": "Question Review",
+      "text_context": "Q1: What is 2 + 2? Your answer: 4",
+      "input": "Reviewing question 1",
+      "screen_data": {
+        "timer_state": "N/A",
+        "score_state": "N/A",
+        "media_status": "None",
+        "ui_feedback": "Question feedback with points",
+        "next_screen": "Question Review"
+      }
+    },
+    {
+      "step": 4,
+      "phase": "Question Review",
+      "page": "Question Review",
+      "text_context": "Q2: What color is the sky? Your answer: Blue",
+      "input": "Reviewing question 2",
+      "screen_data": {
+        "timer_state": "N/A",
+        "score_state": "N/A",
+        "media_status": "None",
+        "ui_feedback": "Question feedback with points",
+        "next_screen": "Question Review"
+      }
+    },
+    {
+      "step": 5,
+      "phase": "Question Review",
+      "page": "Question Review",
+      "text_context": "Q3: What is H2O commonly called? Your answer: Water",
+      "input": "Reviewing question 3",
+      "screen_data": {
+        "timer_state": "N/A",
+        "score_state": "N/A",
+        "media_status": "None",
+        "ui_feedback": "Question feedback with points",
+        "next_screen": "Question Review"
+      }
+    },
+    {
+      "step": 6,
+      "phase": "Question Review",
+      "page": "Question Review",
+      "text_context": "Q4: What is the capital of France? Your answer: Paris",
+      "input": "Reviewing question 4",
+      "screen_data": {
+        "timer_state": "N/A",
+        "score_state": "N/A",
+        "media_status": "None",
+        "ui_feedback": "Question feedback with points",
+        "next_screen": "Question Review"
+      }
+    },
+    {
+      "step": 7,
+      "phase": "Question Review",
+      "page": "Question Review",
+      "text_context": "Q5: What food is this? Your answer: spaghetti",
+      "input": "Reviewing question 5",
+      "screen_data": {
+        "timer_state": "N/A",
+        "score_state": "N/A",
+        "media_status": "None",
+        "ui_feedback": "Question feedback with points",
+        "next_screen": "Quiz Screen"
+      }
+    },
+    {
+      "step": 8,
+      "phase": "Repeat Loop",
+      "page": "Quiz Screen",
+      "text_context": "Who is getting in first place?",
+      "input": "Starting new quiz attempt",
+      "screen_data": {
+        "timer_state": "29s",
+        "score_state": "0",
+        "media_status": "Black screen placeholder",
+        "ui_feedback": "Question displayed with timer and score",
+        "next_screen": "Quiz Complete"
+      }
+    },
+    {
+      "step": 9,
+      "phase": "Repeat Loop",
+      "page": "Quiz Complete",
+      "text_context": "Duel Complete! 147.06 points 7/7 correct",
+      "input": "Quiz submission",
+      "screen_data": {
+        "timer_state": "0s",
+        "score_state": "147.06",
+        "media_status": "None",
+        "ui_feedback": "Final score displayed with correctness",
+        "next_screen": "Question Review"
+      }
+    },
+    {
+      "step": 10,
+      "phase": "Repeat Loop",
+      "page": "Question Review",
+      "text_context": "Q1: What is 2 + 2? Your answer: 4",
+      "input": "Reviewing question 1",
+      "screen_data": {
+        "timer_state": "N/A",
+        "score_state": "N/A",
+        "media_status": "None",
+        "ui_feedback": "Question feedback with points",
+        "next_screen": "Question Review"
+      }
+    },
+    {
+      "step": 11,
+      "phase": "Repeat Loop",
+      "page": "Question Review",
+      "text_context": "Q2: What color is the sky? Your answer: Blue",
+      "input": "Reviewing question 2",
+      "screen_data": {
+        "timer_state": "N/A",
+        "score_state": "N/A",
+        "media_status": "None",
+        "ui_feedback": "Question feedback with points",
+        "next_screen": "Question Review"
+      }
+    },
+    {
+      "step": 12,
+      "phase": "Repeat Loop",
+      "page": "Question Review",
+      "text_context": "Q3: What is H2O commonly called? Your answer: Water",
+      "input": "Reviewing question 3",
+      "screen_data": {
+        "timer_state": "N/A",
+        "score_state": "N/A",
+        "media_status": "None",
+        "ui_feedback": "Question feedback with points",
+        "next_screen": "Question Review"
+      }
+    },
+    {
+      "step": 13,
+      "phase": "Repeat Loop",
+      "page": "Question Review",
+      "text_context": "Q4: What is the capital of France? Your answer: Paris",
+      "input": "Reviewing question 4",
+      "screen_data": {
+        "timer_state": "N/A",
+        "score_state": "N/A",
+        "media_status": "None",
+        "ui_feedback": "Question feedback with points",
+        "next_screen": "Question Review"
+      }
+    },
+    {
+      "step": 14,
+      "phase": "Repeat Loop",
+      "page": "Question Review",
+      "text_context": "Q5: What food is this? Your answer: spaghetti",
+      "input": "Reviewing question 5",
+      "screen_data": {
+        "timer_state": "N/A",
+        "score_state": "N/A",
+        "media_status": "None",
+        "ui_feedback": "Question feedback with points",
+        "next_screen": "Quiz Screen"
+      }
+    }
+  ]
+}

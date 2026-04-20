@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vidlizer"
+version = "0.1.0"
+description = "Frame-by-frame video → JSON user-journey map"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.32",
+    "python-dotenv>=1.0",
+    "questionary>=2.0",
+    "rich>=13.0",
+]
+
+[project.scripts]
+vidlizer = "vidlizer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vidlizer*"]

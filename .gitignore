@@ -1,0 +1,27 @@
+# secrets
+.env
+.env.*
+!env.sample
+
+# python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# tool output (captured screen text may be sensitive)
+*.analysis.json
+*.raw.txt
+
+# editor / os
+.DS_Store
+.vscode/
+.idea/
+*.swp
