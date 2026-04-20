@@ -11,9 +11,12 @@ import tempfile
 import time
 from pathlib import Path
 
+import sys
+
 import requests
 from rich.console import Console
 from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
@@ -193,30 +196,33 @@ def _post(
     verbose: bool,
     tracker: CostTracker | None = None,
     label: str = "",
+    n_frames: int = 0,
 ) -> dict:
-    payload_bytes = json.dumps(payload).encode()
+    stream_payload = {**payload, "stream": True, "stream_options": {"include_usage": True}}
+    payload_bytes = json.dumps(stream_payload).encode()
     kb = len(payload_bytes) // 1024
-    if verbose:
-        _dbg(f"[debug] POST {label} model={model} payload={kb} KB")
 
-    with _console.status(
-        f"  [dim]{label}[/dim] sending [cyan]{kb}[/cyan] KB to [bold]{model}[/bold]…",
-        spinner="dots2",
-    ):
-        r = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/arizawan/vidlizer",
-                "X-Title": "vidlizer",
-            },
-            data=payload_bytes,
-            timeout=timeout,
-        )
-
+    frame_info = f"  [white]{n_frames}f[/white]" if n_frames else ""
+    _console.print(
+        f"[cyan]→[/cyan] [bold]{label}[/bold]{frame_info}  "
+        f"[dim]{kb} KB[/dim]  [dim]→[/dim]  [magenta]{model}[/magenta]"
+    )
     if verbose:
-        _dbg(f"[debug] status={r.status_code} response={len(r.content)/1024:.1f} KB")
+        _dbg(f"[debug] POST stream=True payload={kb} KB")
+
+    r = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/arizawan/vidlizer",
+            "X-Title": "vidlizer",
+        },
+        data=payload_bytes,
+        timeout=timeout,
+        stream=True,
+    )
+
     if r.status_code == 429:
         raise RuntimeError(f"rate_limited: {r.text[:500]}")
     if not r.ok:
@@ -224,23 +230,73 @@ def _post(
         if "image" in err_text.lower() and ("most" in err_text.lower() or "limit" in err_text.lower()):
             raise ImageLimitError(err_text)
         raise RuntimeError(f"OpenRouter {r.status_code}: {err_text}")
-    body = r.json()
-    if "error" in body:
-        err = body["error"]
-        err_str = json.dumps(err) if isinstance(err, dict) else str(err)
-        if "image" in err_str.lower() and ("most" in err_str.lower() or "limit" in err_str.lower()):
-            raise ImageLimitError(err_str)
-        raise RuntimeError(f"OpenRouter error: {err_str}")
-    usage = body.get("usage") or {}
-    batch_cost = tracker.add(model, usage) if tracker else _model_cost(
-        model, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+
+    full_content = ""
+    usage: dict = {}
+
+    sys.stderr.write("   \033[2m")  # indent + dim ANSI
+    sys.stderr.flush()
+
+    for raw_line in r.iter_lines():
+        if not raw_line:
+            continue
+        line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+        if not line.startswith("data: "):
+            continue
+        data_str = line[6:]
+        if data_str.strip() == "[DONE]":
+            break
+        try:
+            chunk = json.loads(data_str)
+        except json.JSONDecodeError:
+            continue
+
+        if chunk.get("usage"):
+            usage = chunk["usage"]
+
+        if "error" in chunk:
+            sys.stderr.write("\033[0m\n")
+            sys.stderr.flush()
+            err = chunk["error"]
+            err_str = json.dumps(err) if isinstance(err, dict) else str(err)
+            if "image" in err_str.lower() and ("most" in err_str.lower() or "limit" in err_str.lower()):
+                raise ImageLimitError(err_str)
+            raise RuntimeError(f"OpenRouter error: {err_str}")
+
+        choices = chunk.get("choices") or []
+        if choices:
+            delta = choices[0].get("delta") or {}
+            piece = delta.get("content") or ""
+            if piece:
+                full_content += piece
+                sys.stderr.write(piece)
+                sys.stderr.flush()
+
+    sys.stderr.write("\033[0m\n")  # reset + newline
+    sys.stderr.flush()
+
+    if tracker:
+        batch_cost = tracker.add(model, usage)  # may raise CostCapExceeded
+    else:
+        pt = usage.get("prompt_tokens", 0) or 0
+        ct = usage.get("completion_tokens", 0) or 0
+        batch_cost = _model_cost(model, pt, ct)
+
+    pt = usage.get("prompt_tokens", 0) or 0
+    ct = usage.get("completion_tokens", 0) or 0
+    cost_str = f"[green]~${batch_cost:.4f}[/green]" if batch_cost > 0 else "[cyan]free[/cyan]"
+    _console.print(
+        f"   [dim]tokens:[/dim] [cyan]{pt:,}[/cyan][dim]↑[/dim]  "
+        f"[cyan]{ct:,}[/cyan][dim]↓[/dim]  {cost_str}"
     )
+
     if verbose:
-        pt, ct = usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
-        cost_str = f"~${batch_cost:.4f}" if batch_cost > 0 else "free"
-        _dbg(f"[debug] tokens: {pt}↑  {ct}↓  {cost_str}")
-        _dbg(f"[debug] full response:\n{json.dumps(body, indent=2)[:3000]}")
-    return body
+        _dbg(f"[debug] stream complete, content={len(full_content)} chars")
+
+    return {
+        "choices": [{"message": {"content": full_content}}],
+        "usage": usage,
+    }
 
 
 _MAX_RECURSION_DEPTH = 4
@@ -275,15 +331,13 @@ def call_openrouter(
                 "messages": [{"role": "user", "content": content}],
                 "response_format": {"type": "json_object"},
                 "temperature": 0.1,
-            }, timeout, verbose, tracker, label="[1/1]")
-            usage = body.get("usage") or {}
-            cost = _model_cost(model, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
-            cost_str = f"[green]~${cost:.4f}[/green]" if cost > 0 else "[cyan]free[/cyan]"
+            }, timeout, verbose, tracker, label="[1/1]", n_frames=len(frames))
+            result = parse_json(body["choices"][0]["message"]["content"])
             _console.print(
                 f"  [green]✓[/green] [bold][1/1][/bold]  "
-                f"[white]{len(frames)} frames[/white]  [dim]|[/dim]  {cost_str}"
+                f"[white]{len(result.get('flow', []))} steps[/white]"
             )
-            return parse_json(body["choices"][0]["message"]["content"])
+            return result
         except ImageLimitError:
             auto_batch = max(1, len(frames) // 5)
             _warn(f"image limit hit — auto-batching at [bold]{auto_batch}[/bold] frames/request")
@@ -316,7 +370,7 @@ def call_openrouter(
                 "messages": [{"role": "user", "content": content}],
                 "response_format": {"type": "json_object"},
                 "temperature": 0.1,
-            }, timeout, verbose, tracker, label=label)
+            }, timeout, verbose, tracker, label=label, n_frames=len(chunk))
         except ImageLimitError:
             smaller = max(1, len(chunk) // 2)
             _warn(f"chunk {i+1} hit image limit — re-splitting to batch_size={smaller}")
@@ -345,13 +399,10 @@ def call_openrouter(
             step["step"] = step_offset + j
         all_steps.extend(steps)
 
-        usage = body.get("usage") or {}
-        batch_cost = _model_cost(model, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
-        cost_str = f"[green]~${batch_cost:.4f}[/green]" if batch_cost > 0 else "[cyan]free[/cyan]"
         _console.print(
             f"  [green]✓[/green] [bold]{label}[/bold]  "
             f"frames [white]{chunk_start+1}–{chunk_start+len(chunk)}[/white]  "
-            f"[dim]|[/dim]  [white]{len(steps)} steps[/white]  [dim]|[/dim]  {cost_str}"
+            f"[dim]|[/dim]  [white]{len(steps)} steps[/white]"
         )
 
         step_offset += len(steps)
@@ -371,6 +422,25 @@ def parse_json(text: str | dict) -> dict:
             text = text[4:]
         text = text.rsplit("```", 1)[0]
     return json.loads(text.strip())
+
+
+def _show_result_preview(data: dict, preview_steps: int = 3) -> None:
+    steps = data.get("flow", [])
+    n = len(steps)
+    if n == 0:
+        return
+    shown = min(preview_steps, n)
+    preview_str = json.dumps({"flow": steps[:shown]}, indent=2, ensure_ascii=False)
+    if n > shown:
+        # Trim closing brace and append a truncation hint
+        preview_str = preview_str.rstrip()[:-2].rstrip() + f",\n    // ... {n - shown} more steps\n  ]\n}}"
+    syntax = Syntax(preview_str, "json", theme="monokai", line_numbers=True, word_wrap=True)
+    _console.print(Panel(
+        syntax,
+        title=f"[dim]result preview  [white]{n} steps[/white][/dim]",
+        border_style="dim",
+        padding=(0, 1),
+    ))
 
 
 _EXPENSIVE_THRESHOLD_USD_PER_1M = 1.00  # warn if input price > this
@@ -467,6 +537,8 @@ def run(
 
     output.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
+    _console.print()
+    _show_result_preview(data)
     _console.print()
     t = Table.grid(padding=(0, 2))
     t.add_column(style="green bold")
