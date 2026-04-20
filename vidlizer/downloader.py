@@ -46,6 +46,8 @@ def download(url: str, out_dir: Path) -> Path:
         "quiet": True,
         "no_playlist": True,
         "noplaylist": True,
+        # iOS client bypasses YouTube's n-challenge (no JS runtime needed)
+        "extractor_args": {"youtube": {"player_client": ["ios"]}},
     }
 
     if YDL is not None:
@@ -74,7 +76,8 @@ def get_metadata(url: str) -> dict:
         YDL = _ydl()
         if YDL is None:
             return {"url": url}
-        with YDL({"skip_download": True, "quiet": True, "no_playlist": True}) as ydl:
+        with YDL({"skip_download": True, "quiet": True, "no_playlist": True,
+                   "extractor_args": {"youtube": {"player_client": ["ios"]}}}) as ydl:
             info = ydl.extract_info(url, download=False) or {}
             return {
                 "title": info.get("title"),
