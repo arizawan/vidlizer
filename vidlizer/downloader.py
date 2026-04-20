@@ -56,9 +56,10 @@ def download(url: str, out_dir: Path) -> Path:
     else:
         import subprocess
         r = subprocess.run(
-            ["yt-dlp", "--no-playlist", "-f",
-             "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-             "--merge-output-format", "mp4", "-o", tmpl, url],
+            ["yt-dlp", "--no-playlist", "-f", "bestvideo+bestaudio/best",
+             "--merge-output-format", "mp4",
+             "--extractor-args", "youtube:player_client=android_vr",
+             "-o", tmpl, url],
             capture_output=True, text=True,
         )
         if r.returncode != 0:
@@ -77,7 +78,7 @@ def get_metadata(url: str) -> dict:
         if YDL is None:
             return {"url": url}
         with YDL({"skip_download": True, "quiet": True, "no_playlist": True,
-                   "extractor_args": {"youtube": {"player_client": ["ios"]}}}) as ydl:
+                   "extractor_args": {"youtube": {"player_client": ["android_vr"]}}}) as ydl:
             info = ydl.extract_info(url, download=False) or {}
             return {
                 "title": info.get("title"),
