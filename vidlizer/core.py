@@ -21,6 +21,8 @@ from rich.table import Table
 from rich.text import Text
 
 from vidlizer.models import get_pricing
+from vidlizer import cache as _cache
+from vidlizer.dedup import dedup_frames, DEFAULT_THRESHOLD as _DEDUP_DEFAULT
 
 _console = Console(stderr=True, highlight=False)
 
@@ -125,6 +127,8 @@ def extract_frames(
     fps: float | None,
     min_interval: float,
     verbose: bool,
+    start: float | None = None,
+    end: float | None = None,
 ) -> list[Path]:
     """Hybrid extraction: scene-change OR time-based minimum interval."""
     if fps is not None:
@@ -143,6 +147,12 @@ def extract_frames(
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "warning" if verbose else "error",
         "-y", "-i", str(video),
+    ]
+    if start is not None:
+        cmd += ["-ss", str(start)]
+    if end is not None:
+        cmd += ["-to", str(end)]
+    cmd += [
         "-vf", vf,
         "-vsync", "vfr",
         "-frames:v", str(max_frames),
@@ -519,6 +529,10 @@ def run(
     timeout: int = 600,
     verbose: bool = False,
     max_cost: float = 1.00,
+    start: float | None = None,
+    end: float | None = None,
+    dedup_threshold: int = _DEDUP_DEFAULT,
+    with_transcript: bool = False,
 ) -> int:
     global _live_models
     v = verbose
@@ -575,10 +589,14 @@ def run(
             tmp_path = Path(tmp)  # type: ignore[arg-type]
             if v:
                 _dbg(f"[debug] temp dir: {tmp_path}")
-            frames = extract_frames(video, tmp_path, scale, max_frames, scene, fps, min_interval, v)
+            frames = extract_frames(video, tmp_path, scale, max_frames, scene, fps, min_interval, v, start, end)
             if not frames:
                 _err("no frames extracted — try --fps 0.5 or lower --scene threshold")
                 return 1
+            before = len(frames)
+            frames = dedup_frames(frames, dedup_threshold)
+            if len(frames) < before:
+                _info(f"dedup: [bold]{before - len(frames)}[/bold] duplicate frames removed ({len(frames)} remain)")
 
         if is_image:
             label = "image"
@@ -591,6 +609,24 @@ def run(
             f"[dim](batch={batch_size or 'auto'}, output: {output})[/dim]"
         )
         _console.print()
+
+        cache_params = {
+            "model": model, "max_frames": max_frames, "scene": scene,
+            "min_interval": min_interval, "fps": str(fps), "scale": scale,
+            "batch_size": batch_size, "start": str(start), "end": str(end),
+            "dedup": dedup_threshold, "transcript": with_transcript,
+        }
+        cached = _cache.get(video if not is_image else video, cache_params)
+        if cached is not None:
+            _info("[dim]cache hit[/dim]")
+            output.write_text(json.dumps(cached, indent=2, ensure_ascii=False))
+            _show_result_preview(cached)
+            steps_c = len(cached.get("flow", []))
+            _console.print(Panel(
+                f"[green]✓[/green] [bold]{steps_c} steps[/bold] (cached) → [cyan]{output}[/cyan]",
+                border_style="green", padding=(0, 1),
+            ))
+            return 0
 
         def _try_model(m: str, trk: CostTracker) -> tuple[dict | None, int]:
             """Run up to 3 attempts. Returns (data, rc) where rc=-1 means exhausted."""
@@ -635,6 +671,22 @@ def run(
     if steps == 0:
         _warn("model returned 0 steps — check --verbose output for clues")
 
+    # Transcription (video only, optional dep)
+    if with_transcript and not is_image and not is_pdf:
+        from vidlizer.transcribe import transcribe, is_available
+        if not is_available():
+            _warn("faster-whisper not installed — skipping transcript  "
+                  "[dim](pip install vidlizer[transcribe])[/dim]")
+        else:
+            with _console.status("[dim]transcribing audio…[/dim]", spinner="dots2"):
+                segments = transcribe(video)
+            if segments:
+                data["transcript"] = segments
+                _info(f"transcript: [bold]{len(segments)} segments[/bold]")
+            else:
+                _warn("transcription produced no output")
+
+    _cache.put(video, cache_params, data)
     output.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
     _console.print()

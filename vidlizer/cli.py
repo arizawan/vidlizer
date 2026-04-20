@@ -2,10 +2,12 @@
 """Interactive CLI entry point for vidlizer."""
 from __future__ import annotations
 
+import contextlib
 import os
 import platform
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -82,8 +84,15 @@ def _print_config(args: dict) -> None:
     t.add_row("video", str(args["video"]))
     t.add_row("model", f"[magenta]{args['model']}[/magenta]")
     t.add_row("output", f"[cyan]{args['output']}[/cyan]")
-    t.add_row("frames", f"max {args['max_frames']}  ·  scene>{args['scene']}  ·  interval {args['min_interval']}s")
+    frames_row = f"max {args['max_frames']}  ·  scene>{args['scene']}  ·  interval {args['min_interval']}s"
+    if args.get("start") is not None or args.get("end") is not None:
+        s = args.get("start", 0)
+        e = args.get("end", "end")
+        frames_row += f"  ·  [yellow]{s}s → {e}s[/yellow]"
+    t.add_row("frames", frames_row)
     t.add_row("cost cap", f"[yellow]${args['max_cost']:.2f}[/yellow]  [dim](abort if exceeded)[/dim]")
+    if args.get("with_transcript"):
+        t.add_row("transcript", "[cyan]enabled[/cyan]")
     _console.print(Panel(t, title="[dim]config[/dim]", border_style="dim", padding=(0, 1)))
     _console.print()
 
@@ -252,6 +261,10 @@ def interactive_args(video: Path | None) -> dict:
     args["max_cost"] = float(os.getenv("MAX_COST_USD", "1.00"))
     args["verbose"] = False
     args["fps"] = None
+    args["start"] = None
+    args["end"] = None
+    args["dedup_threshold"] = 8
+    args["with_transcript"] = False
 
     return args
 
@@ -269,11 +282,11 @@ def _main() -> int:
 
     import argparse
     p = argparse.ArgumentParser(
-        description="vidlizer — analyze a video frame-by-frame → JSON user-journey map.",
+        description="vidlizer — analyze video/image/PDF → JSON user-journey map.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Any omitted options will be asked interactively when running in a terminal.",
     )
-    p.add_argument("video", nargs="?", type=Path, help="Path to video file")
+    p.add_argument("video", nargs="?", type=str, help="Path to file or URL (YouTube, Loom, Vimeo, Twitter)")
     p.add_argument("-o", "--output", type=Path)
     p.add_argument("-v", "--verbose", action="store_true")
     p.add_argument("--model", default=None)
@@ -286,32 +299,68 @@ def _main() -> int:
     p.add_argument("--timeout", type=int, default=None)
     p.add_argument("--max-cost", type=float, default=None, dest="max_cost",
                    help="Abort mid-run if spend exceeds this many USD (default 1.00)")
+    p.add_argument("--start", type=float, default=None,
+                   help="Analyze from this timestamp in seconds (analyze_moment)")
+    p.add_argument("--end", type=float, default=None,
+                   help="Analyze up to this timestamp in seconds (analyze_moment)")
+    p.add_argument("--transcript", action="store_true", dest="with_transcript",
+                   help="Transcribe audio (requires: pip install faster-whisper)")
+    p.add_argument("--dedup-threshold", type=int, default=None, dest="dedup_threshold",
+                   help="Perceptual dedup Hamming threshold (default 8, 0=off)")
     cli = p.parse_args()
 
     _print_banner()
 
-    # Build args: interactive fills missing values
-    iargs = interactive_args(cli.video)
+    # Handle URL input — download to a managed temp dir before interactive_args
+    video_raw = cli.video
+    url_ctx: contextlib.AbstractContextManager = contextlib.nullcontext(None)
+    video_path: Path | None = Path(video_raw) if video_raw else None
 
-    # CLI flags override interactive answers
-    if cli.output:              iargs["output"] = cli.output
-    if cli.model:               iargs["model"] = cli.model
-    if cli.scene is not None:   iargs["scene"] = cli.scene
-    if cli.min_interval is not None: iargs["min_interval"] = cli.min_interval
-    if cli.fps is not None:     iargs["fps"] = cli.fps
-    if cli.scale is not None:   iargs["scale"] = cli.scale
-    if cli.max_frames is not None: iargs["max_frames"] = cli.max_frames
-    if cli.batch_size is not None: iargs["batch_size"] = cli.batch_size
-    if cli.timeout is not None: iargs["timeout"] = cli.timeout
-    if cli.max_cost is not None: iargs["max_cost"] = cli.max_cost
-    if cli.verbose:             iargs["verbose"] = True
+    if video_raw:
+        from vidlizer.downloader import is_url, download, get_metadata
+        if is_url(video_raw):
+            url_tmp = tempfile.TemporaryDirectory(prefix="vidlizer_dl_")
+            url_ctx = url_tmp
+            _console.print(f"[cyan]→[/cyan] [bold]{video_raw}[/bold]")
+            with _console.status("[dim]fetching metadata…[/dim]", spinner="dots2"):
+                meta = get_metadata(video_raw)
+            if meta.get("title"):
+                _console.print(f"   [dim]{meta['title']}[/dim]")
+            with _console.status("[dim]downloading…[/dim]", spinner="dots2"):
+                try:
+                    video_path = download(video_raw, Path(url_tmp.name))
+                except RuntimeError as e:
+                    _console.print(f"[red]✗[/red]  [red]{e}[/red]")
+                    return 2
+            _console.print()
 
-    _print_config(iargs)
-    _console.print(Rule(style="dim"))
-    _console.print()
+    with url_ctx:
+        # Build args: interactive fills missing values
+        iargs = interactive_args(video_path)
 
-    from vidlizer.core import run
-    return run(**iargs)
+        # CLI flags override interactive answers
+        if cli.output:                       iargs["output"] = cli.output
+        if cli.model:                        iargs["model"] = cli.model
+        if cli.scene is not None:            iargs["scene"] = cli.scene
+        if cli.min_interval is not None:     iargs["min_interval"] = cli.min_interval
+        if cli.fps is not None:              iargs["fps"] = cli.fps
+        if cli.scale is not None:            iargs["scale"] = cli.scale
+        if cli.max_frames is not None:       iargs["max_frames"] = cli.max_frames
+        if cli.batch_size is not None:       iargs["batch_size"] = cli.batch_size
+        if cli.timeout is not None:          iargs["timeout"] = cli.timeout
+        if cli.max_cost is not None:         iargs["max_cost"] = cli.max_cost
+        if cli.start is not None:            iargs["start"] = cli.start
+        if cli.end is not None:              iargs["end"] = cli.end
+        if cli.with_transcript:              iargs["with_transcript"] = True
+        if cli.dedup_threshold is not None:  iargs["dedup_threshold"] = cli.dedup_threshold
+        if cli.verbose:                      iargs["verbose"] = True
+
+        _print_config(iargs)
+        _console.print(Rule(style="dim"))
+        _console.print()
+
+        from vidlizer.core import run
+        return run(**iargs)
 
 
 if __name__ == "__main__":
