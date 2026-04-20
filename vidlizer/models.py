@@ -132,6 +132,15 @@ def get_pricing(model_id: str, models: list[dict] | None = None) -> tuple[float,
     return 0.0, 0.0
 
 
+def get_cheapest_paid(models: list[dict] | None = None) -> str:
+    """Return the ID of the cheapest non-free vision model."""
+    pool = models or _FALLBACK
+    paid = [m for m in pool if not m.get("free")]
+    if not paid:
+        return "google/gemini-2.5-flash"
+    return min(paid, key=lambda m: m["input_usd_per_1m"])["id"]
+
+
 def format_model_line(m: dict) -> str:
     """One-line label for model picker: id  [price  ctx  RL-flag]."""
     parts: list[str] = []

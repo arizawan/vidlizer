@@ -551,30 +551,44 @@ def run(
         )
         _console.print()
 
+        def _try_model(m: str, trk: CostTracker) -> tuple[dict | None, int]:
+            """Run up to 3 attempts. Returns (data, rc) where rc=-1 means exhausted."""
+            for attempt in range(1, 4):
+                try:
+                    return call_openrouter(api_key, m, frames, timeout, v, batch_size, trk, is_image=is_image), 0
+                except CostCapExceeded as e:
+                    _err(str(e))
+                    _warn("partial run — no output written. Raise MAX_COST_USD or use a cheaper model.")
+                    return None, 3
+                except RuntimeError as e:
+                    if "rate_limited" in str(e) and attempt < 3:
+                        wait = 15 * attempt
+                        _warn(f"rate limited — retrying in [bold]{wait}s[/bold] (attempt {attempt}/3)")
+                        time.sleep(wait)
+                    else:
+                        _err(f"[bold]{m}[/bold] failed: {e}")
+                        return None, -1
+                except (json.JSONDecodeError, requests.RequestException) as e:
+                    _err(f"[bold]{m}[/bold] failed: {e}")
+                    return None, -1
+            return None, -1  # retries exhausted
+
         tracker = CostTracker(max_cost=max_cost)
-        data = None
-        for attempt in range(1, 4):
-            try:
-                data = call_openrouter(api_key, model, frames, timeout, v, batch_size, tracker, is_image=is_image)
-                break
-            except CostCapExceeded as e:
-                _err(str(e))
-                _warn("partial run — no output written. Raise MAX_COST_USD or use a cheaper model.")
-                return 3
-            except RuntimeError as e:
-                if "rate_limited" in str(e) and attempt < 3:
-                    wait = 15 * attempt
-                    _warn(f"rate limited — retrying in [bold]{wait}s[/bold] (attempt {attempt}/3)")
-                    time.sleep(wait)
-                else:
-                    _err(f"API call failed: {e}")
-                    return 1
-            except (json.JSONDecodeError, requests.RequestException) as e:
-                _err(f"API call failed: {e}")
-                return 1
+        data, rc = _try_model(model, tracker)
+
+        if data is None and rc == -1:
+            # If a free model failed, auto-fallback to cheapest paid model
+            is_free = next((m["free"] for m in _live_models if m["id"] == model), model.endswith(":free"))
+            if is_free:
+                from vidlizer.models import get_cheapest_paid
+                fallback = get_cheapest_paid(_live_models)
+                _warn(f"free model failed — falling back to [bold]{fallback}[/bold]")
+                model = fallback
+                data, rc = _try_model(model, tracker)
+
         if data is None:
-            _err("all retries exhausted")
-            return 1
+            _err("all retries exhausted" if rc == -1 else "")
+            return max(rc, 1)
 
     steps = len(data.get("flow", []))
     if steps == 0:
