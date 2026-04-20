@@ -46,8 +46,8 @@ def download(url: str, out_dir: Path) -> Path:
         "quiet": True,
         "no_playlist": True,
         "noplaylist": True,
-        # iOS client bypasses YouTube's n-challenge (no JS runtime needed)
-        "extractor_args": {"youtube": {"player_client": ["ios"]}},
+        # android_vr is JS-less: no n-challenge, no PO token needed
+        "extractor_args": {"youtube": {"player_client": ["android_vr"]}},
     }
 
     if YDL is not None:
