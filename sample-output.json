@@ -2,199 +2,75 @@
   "flow": [
     {
       "step": 1,
-      "phase": "Initial Run",
-      "page": "Quiz Screen",
-      "text_context": "Who is getting in first place?",
-      "input": "No input yet",
-      "screen_data": {
-        "timer_state": "27s",
-        "score_state": "125.86",
-        "media_status": "Black screen placeholder",
-        "ui_feedback": "Question displayed with timer and score",
-        "next_screen": "Quiz Complete"
-      }
+      "timestamp_s": 0.0,
+      "phase": "Introduction",
+      "scene": "Title card with product logo on a dark background.",
+      "subjects": ["Logo", "Text overlay"],
+      "action": "Static title card displayed.",
+      "text_visible": "vidlizer — analyze any video",
+      "context": "Opening of a product demo.",
+      "observations": "Clean minimal design with high contrast.",
+      "next_scene": "Terminal window showing CLI invocation.",
+      "speech": "Welcome to the vidlizer demo. Let me show you how it works."
     },
     {
       "step": 2,
-      "phase": "Initial Run",
-      "page": "Quiz Complete",
-      "text_context": "Duel Complete! 147.06 points 7/7 correct",
-      "input": "Quiz submission",
-      "screen_data": {
-        "timer_state": "0s",
-        "score_state": "147.06",
-        "media_status": "None",
-        "ui_feedback": "Final score displayed with correctness",
-        "next_screen": "Question Review"
-      }
+      "timestamp_s": 4.2,
+      "phase": "Demo",
+      "scene": "Terminal window in dark mode, cursor at prompt.",
+      "subjects": ["Terminal", "Command line"],
+      "action": "User types 'vidlizer demo.mp4' and presses Enter.",
+      "text_visible": "$ vidlizer demo.mp4",
+      "context": "CLI invocation of vidlizer on a local video file.",
+      "observations": "Font is JetBrains Mono; iTerm2 on macOS.",
+      "next_scene": "Progress output showing frame extraction.",
+      "speech": "I'll run it on a local MP4 file."
     },
     {
       "step": 3,
-      "phase": "Question Review",
-      "page": "Question Review",
-      "text_context": "Q1: What is 2 + 2? Your answer: 4",
-      "input": "Reviewing question 1",
-      "screen_data": {
-        "timer_state": "N/A",
-        "score_state": "N/A",
-        "media_status": "None",
-        "ui_feedback": "Question feedback with points",
-        "next_screen": "Question Review"
-      }
+      "timestamp_s": 7.8,
+      "phase": "Demo",
+      "scene": "Terminal showing Rich-formatted progress output with frame count and cost.",
+      "subjects": ["Terminal", "Progress bar", "Cost display"],
+      "action": "vidlizer extracts frames, sends them to the vision model, and streams results.",
+      "text_visible": "extracting frames … 24 frames · dedup → 18 · $0.002",
+      "context": "Processing phase after CLI invocation.",
+      "observations": "Dedup reduced frame count by 25%, keeping cost low.",
+      "next_scene": "JSON output file being written to disk.",
+      "speech": "It's extracting frames now and removing near-duplicates before sending to the model."
     },
     {
       "step": 4,
-      "phase": "Question Review",
-      "page": "Question Review",
-      "text_context": "Q2: What color is the sky? Your answer: Blue",
-      "input": "Reviewing question 2",
-      "screen_data": {
-        "timer_state": "N/A",
-        "score_state": "N/A",
-        "media_status": "None",
-        "ui_feedback": "Question feedback with points",
-        "next_screen": "Question Review"
-      }
+      "timestamp_s": 14.1,
+      "phase": "Output",
+      "scene": "Editor showing the generated JSON analysis file.",
+      "subjects": ["VS Code", "JSON file", "flow array"],
+      "action": "User opens demo.analysis.json; structured flow array is visible.",
+      "text_visible": "demo.analysis.json",
+      "context": "Reviewing the structured output after analysis completes.",
+      "observations": "Each step has timestamp_s, scene, action, and speech fields populated.",
+      "next_scene": "Closing screen with GitHub link.",
+      "speech": "And here's the resulting JSON — every scene, action, and spoken word, timestamped."
     },
     {
       "step": 5,
-      "phase": "Question Review",
-      "page": "Question Review",
-      "text_context": "Q3: What is H2O commonly called? Your answer: Water",
-      "input": "Reviewing question 3",
-      "screen_data": {
-        "timer_state": "N/A",
-        "score_state": "N/A",
-        "media_status": "None",
-        "ui_feedback": "Question feedback with points",
-        "next_screen": "Question Review"
-      }
-    },
-    {
-      "step": 6,
-      "phase": "Question Review",
-      "page": "Question Review",
-      "text_context": "Q4: What is the capital of France? Your answer: Paris",
-      "input": "Reviewing question 4",
-      "screen_data": {
-        "timer_state": "N/A",
-        "score_state": "N/A",
-        "media_status": "None",
-        "ui_feedback": "Question feedback with points",
-        "next_screen": "Question Review"
-      }
-    },
-    {
-      "step": 7,
-      "phase": "Question Review",
-      "page": "Question Review",
-      "text_context": "Q5: What food is this? Your answer: spaghetti",
-      "input": "Reviewing question 5",
-      "screen_data": {
-        "timer_state": "N/A",
-        "score_state": "N/A",
-        "media_status": "None",
-        "ui_feedback": "Question feedback with points",
-        "next_screen": "Quiz Screen"
-      }
-    },
-    {
-      "step": 8,
-      "phase": "Repeat Loop",
-      "page": "Quiz Screen",
-      "text_context": "Who is getting in first place?",
-      "input": "Starting new quiz attempt",
-      "screen_data": {
-        "timer_state": "29s",
-        "score_state": "0",
-        "media_status": "Black screen placeholder",
-        "ui_feedback": "Question displayed with timer and score",
-        "next_screen": "Quiz Complete"
-      }
-    },
-    {
-      "step": 9,
-      "phase": "Repeat Loop",
-      "page": "Quiz Complete",
-      "text_context": "Duel Complete! 147.06 points 7/7 correct",
-      "input": "Quiz submission",
-      "screen_data": {
-        "timer_state": "0s",
-        "score_state": "147.06",
-        "media_status": "None",
-        "ui_feedback": "Final score displayed with correctness",
-        "next_screen": "Question Review"
-      }
-    },
-    {
-      "step": 10,
-      "phase": "Repeat Loop",
-      "page": "Question Review",
-      "text_context": "Q1: What is 2 + 2? Your answer: 4",
-      "input": "Reviewing question 1",
-      "screen_data": {
-        "timer_state": "N/A",
-        "score_state": "N/A",
-        "media_status": "None",
-        "ui_feedback": "Question feedback with points",
-        "next_screen": "Question Review"
-      }
-    },
-    {
-      "step": 11,
-      "phase": "Repeat Loop",
-      "page": "Question Review",
-      "text_context": "Q2: What color is the sky? Your answer: Blue",
-      "input": "Reviewing question 2",
-      "screen_data": {
-        "timer_state": "N/A",
-        "score_state": "N/A",
-        "media_status": "None",
-        "ui_feedback": "Question feedback with points",
-        "next_screen": "Question Review"
-      }
-    },
-    {
-      "step": 12,
-      "phase": "Repeat Loop",
-      "page": "Question Review",
-      "text_context": "Q3: What is H2O commonly called? Your answer: Water",
-      "input": "Reviewing question 3",
-      "screen_data": {
-        "timer_state": "N/A",
-        "score_state": "N/A",
-        "media_status": "None",
-        "ui_feedback": "Question feedback with points",
-        "next_screen": "Question Review"
-      }
-    },
-    {
-      "step": 13,
-      "phase": "Repeat Loop",
-      "page": "Question Review",
-      "text_context": "Q4: What is the capital of France? Your answer: Paris",
-      "input": "Reviewing question 4",
-      "screen_data": {
-        "timer_state": "N/A",
-        "score_state": "N/A",
-        "media_status": "None",
-        "ui_feedback": "Question feedback with points",
-        "next_screen": "Question Review"
-      }
-    },
-    {
-      "step": 14,
-      "phase": "Repeat Loop",
-      "page": "Question Review",
-      "text_context": "Q5: What food is this? Your answer: spaghetti",
-      "input": "Reviewing question 5",
-      "screen_data": {
-        "timer_state": "N/A",
-        "score_state": "N/A",
-        "media_status": "None",
-        "ui_feedback": "Question feedback with points",
-        "next_screen": "Quiz Screen"
-      }
+      "timestamp_s": 19.5,
+      "phase": "Conclusion",
+      "scene": "Dark slide with GitHub URL and install command.",
+      "subjects": ["Text", "GitHub URL"],
+      "action": "Static closing card displayed.",
+      "text_visible": "github.com/arizawan/vidlizer  |  pip install vidlizer",
+      "context": "End of demo.",
+      "observations": "Call-to-action for viewers to try the tool.",
+      "next_scene": null,
+      "speech": "Give it a try — link is in the description."
     }
+  ],
+  "transcript": [
+    { "start": 0.0,  "end": 3.8,  "text": "Welcome to the vidlizer demo. Let me show you how it works." },
+    { "start": 4.2,  "end": 6.9,  "text": "I'll run it on a local MP4 file." },
+    { "start": 7.8,  "end": 13.5, "text": "It's extracting frames now and removing near-duplicates before sending to the model." },
+    { "start": 14.1, "end": 18.8, "text": "And here's the resulting JSON — every scene, action, and spoken word, timestamped." },
+    { "start": 19.5, "end": 22.1, "text": "Give it a try — link is in the description." }
   ]
 }
