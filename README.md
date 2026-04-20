@@ -1,10 +1,11 @@
 # vidlizer
 
-Frame-by-frame video analyzer → JSON user-journey map via OpenRouter vision models.
+Frame-by-frame video analyzer → structured JSON event map via OpenRouter vision models.
 
-Feed it a screen recording. It samples scene-change frames with ffmpeg, sends them to
-a vision model, and writes a structured `flow` array describing every step the user
-took, the UI feedback they saw, and any logic bugs or media-load failures.
+Feed it any video. It samples scene-change frames with ffmpeg, sends them to a vision
+model, and writes a structured `flow` array describing every event, action, subject,
+and piece of visible text — works for screen recordings, tutorials, interviews,
+product demos, marketing content, or any other video type.
 
 ## Install
 
@@ -51,9 +52,19 @@ Output goes to `<video>.analysis.json` by default, or pass `-o path.json`.
 
 ## Output schema
 
-See `sample-output.json`. Each `flow[]` step has `step`, `phase`, `page`,
-`text_context`, `input`, `screen_data` (`timer_state`, `score_state`,
-`media_status`, `ui_feedback`), and `next_screen`.
+Each `flow[]` step has:
+
+| Field | Description |
+|---|---|
+| `step` | Sequential integer |
+| `phase` | Logical section (Introduction, Action, Conclusion, …) |
+| `scene` | What is currently visible |
+| `subjects` | Key people, objects, or UI elements present |
+| `action` | What is happening (interaction, movement, narration, …) |
+| `text_visible` | All readable text on screen |
+| `context` | Persistent state (timer, score, topic, brand, …) |
+| `observations` | Errors, anomalies, emotions, key facts |
+| `next_scene` | Brief description of what follows |
 
 ## License
 

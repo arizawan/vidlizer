@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Frame-by-frame video analyzer → JSON user-journey map via OpenRouter vision models."""
+"""Frame-by-frame video analyzer → structured JSON event map via OpenRouter vision models."""
 from __future__ import annotations
 
 import base64
@@ -68,33 +68,31 @@ class CostTracker:
         return f"tokens: {tok}  |  cost: {cost}"
 
 
-PROMPT = """Role: Act as an expert QA Automation Engineer and UX Researcher.
+PROMPT = """Role: Act as an expert Video Analyst.
 
-Task: Analyze the uploaded video frame-by-frame to map the complete user journey into a single, exhaustive JSON object.
+Task: Analyze the provided frames and map the complete sequence of events into a single exhaustive JSON object. This applies to ANY type of video: software/app recordings, tutorials, interviews, product demos, marketing content, physical activities, presentations, or anything else.
 
 Observational Rules:
-- Zero Compression: Do not skip steps. If an action happens, it must be a step.
-- State Persistence: Track dynamic values like timers, scores, and progress bars.
-- Input/Output Mapping: Clearly identify what the user did (Input) and exactly how the UI responded (Output/Feedback).
-- Logic Audit: Identify if the system behaves incorrectly (e.g., marking a correct answer as wrong, or failing to load an image).
-- Flow Loops: If the user repeats a process (like taking a quiz twice), document the second run entirely to capture caching or session issues.
-- Media Analysis: Note if images or videos load successfully or fail.
+- Zero Compression: Every meaningful change between frames is a step. Do not skip.
+- Adapt to Content: Infer the video type and use appropriate terminology — UI interaction, physical action, narrative event, speech, etc.
+- Precision: Only describe what is visually evident. Note uncertainty where present.
+- Text: Capture all visible text — UI labels, captions, subtitles, titles, overlays, on-screen code.
+- Issues: Flag errors, anomalies, quality problems, or anything unexpected.
+- Persistence: Track any ongoing state — timer, score, progress bar, speaker identity, topic, brand, etc.
 
-JSON Schema Requirements:
-Produce a single JSON block with an array named `flow`. Each object in the array MUST include:
+JSON Schema:
+Produce a single JSON object with a `flow` array. Each element MUST include:
 - step: Sequential integer.
-- phase: (e.g., "Initial Run", "Repeat Loop", "Navigation").
-- page: The name or description of the current screen.
-- text_context: Specific text, questions, or headers visible on screen.
-- input: The specific user interaction (e.g., "Typed 'Apple'", "Tapped 'Next'").
-- screen_data: An object containing:
-    - timer_state: Time remaining.
-    - score_state: Current points/progress.
-    - media_status: Details on images/videos shown.
-    - ui_feedback: Visual changes (e.g., "Button turned green", "Error popup").
-- next_screen: The resulting page after the input.
+- phase: Logical section (e.g. "Introduction", "Demo", "Action", "Conclusion", "Navigation", "Dialogue").
+- scene: What is currently visible — the setting, screen, environment, or context.
+- subjects: Key people, objects, UI elements, or entities present.
+- action: What is happening — interaction, physical movement, narration, transition, or event.
+- text_visible: All readable text on screen (UI labels, captions, code, titles, overlays). Empty string if none.
+- context: Persistent state or background information relevant to this moment.
+- observations: Notable details — emotions, errors, quality issues, key facts, or anomalies.
+- next_scene: Brief description of what follows.
 
-Output: Provide ONLY a valid JSON object with the `flow` array. No prose, no code fences. Ensure 100% accuracy based on the visual evidence."""
+Output: Provide ONLY a valid JSON object with the `flow` array. No prose, no code fences. 100% accuracy based on visual evidence."""
 
 
 def _info(msg: str) -> None:
@@ -173,12 +171,12 @@ def encode_frame(path: Path) -> dict:
     return {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
 
 
-PROMPT_CONTINUE = """Role: Act as an expert QA Automation Engineer and UX Researcher.
+PROMPT_CONTINUE = """Role: Act as an expert Video Analyst.
 
-These frames are a continuation of a video analysis. Continue mapping the user journey in JSON.
-Start step numbering from {step_offset}. Continue from phase context: {phase_context}.
+These frames continue a video analysis already in progress.
+Start step numbering from {step_offset}. Current phase context: {phase_context}.
 
-Apply all the same rules: Zero Compression, State Persistence, Input/Output Mapping, Logic Audit.
+Apply all the same rules: Zero Compression, adapt to content type, capture all text, flag issues, track persistent state.
 
 Output: Provide ONLY a valid JSON object with the `flow` array continuing from step {step_offset}. No prose, no code fences."""
 
