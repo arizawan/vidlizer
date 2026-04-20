@@ -513,25 +513,41 @@ def parse_json(text: str | dict) -> dict:
 
 
 def _merge_transcript(flow: list[dict], segments: list[dict]) -> None:
-    """Inject 'speech' into each flow step based on overlapping transcript segments."""
+    """Inject 'speech' into flow steps. Each segment goes to exactly one step."""
+    if not flow or not segments:
+        return
     n = len(flow)
+
+    # Build time windows for each step
+    windows: list[tuple[float, float]] = []
     for i, step in enumerate(flow):
         try:
             t_start = float(step.get("timestamp_s") or 0.0)
         except (TypeError, ValueError):
-            continue
-        t_end = float("inf")
-        if i + 1 < n:
-            try:
-                t_end = float(flow[i + 1].get("timestamp_s") or float("inf"))
-            except (TypeError, ValueError):
-                pass
-        speech = " ".join(
-            s["text"] for s in segments
-            if s["end"] > t_start and s["start"] < t_end
-        ).strip()
-        if speech:
-            step["speech"] = speech
+            t_start = 0.0
+        try:
+            t_end = float(flow[i + 1].get("timestamp_s") or float("inf")) if i + 1 < n else float("inf")
+        except (TypeError, ValueError):
+            t_end = float("inf")
+        windows.append((t_start, t_end))
+
+    # Assign each segment to the step whose window contains segment.start
+    buckets: list[list[str]] = [[] for _ in flow]
+    for seg in segments:
+        seg_start = seg["start"]
+        assigned = False
+        for i, (t_start, t_end) in enumerate(windows):
+            if t_start <= seg_start < t_end:
+                buckets[i].append(seg["text"])
+                assigned = True
+                break
+        if not assigned and buckets:
+            # Segment starts before first frame — put in first step
+            buckets[0].append(seg["text"])
+
+    for step, parts in zip(flow, buckets):
+        if parts:
+            step["speech"] = " ".join(parts).strip()
 
 
 _PREVIEW_MAX_LINES = 24
