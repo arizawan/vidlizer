@@ -148,6 +148,32 @@ def _prompt_int(label: str, default: int) -> int:
         return default
 
 
+_VIDEO_EXTS = (
+    "*.mp4 *.mov *.avi *.mkv *.webm *.m4v *.flv *.wmv *.ts *.mts *.mpg *.mpeg"
+)
+
+
+def _pick_file_gui() -> Path | None:
+    """Open a native OS file-picker dialog. Returns None if unavailable."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes("-topmost", True)
+        path = filedialog.askopenfilename(
+            title="Select video file",
+            filetypes=[
+                ("Video files", _VIDEO_EXTS),
+                ("All files", "*.*"),
+            ],
+        )
+        root.destroy()
+        return Path(path) if path else None
+    except Exception:
+        return None
+
+
 def interactive_args(video: Path | None) -> dict:
     """Ask for any missing configuration interactively."""
     load_dotenv()
@@ -159,8 +185,11 @@ def interactive_args(video: Path | None) -> dict:
         if not interactive:
             _console.print("[red]error:[/red] video path required as argument")
             sys.exit(2)
-        raw = _prompt_str("Video file path")
-        video = Path(os.path.expanduser(raw))
+        _console.print("[dim]opening file picker…[/dim]")
+        video = _pick_file_gui()
+        if video is None:
+            raw = _prompt_str("Video file path")
+            video = Path(os.path.expanduser(raw))
     if not video.is_file():
         _console.print(f"[red]error:[/red] file not found: {video}")
         sys.exit(2)
