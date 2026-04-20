@@ -16,27 +16,56 @@ from rich.text import Text
 _console = Console(stderr=True, highlight=False)
 
 
-def _load_model_choices() -> list[tuple[str, str]]:
-    """Fetch live OpenRouter vision models and format as (id, description) tuples."""
-    from vidlizer.models import fetch_models, format_price_label
-    import os
+_SORT_OPTIONS = [
+    ("free_first", "Free first, then cheapest"),
+    ("cheapest",   "Cheapest first"),
+    ("name",       "Name A → Z"),
+    ("context",    "Context length (largest first)"),
+]
+
+
+def _prompt_model() -> str:
+    """Interactive model picker: sort selector → searchable autocomplete."""
+    from vidlizer.models import fetch_models, format_model_line
+
+    with _console.status("[dim]fetching models from OpenRouter…[/dim]", spinner="dots2"):
+        models = fetch_models(os.getenv("OPENROUTER_API_KEY"))
+
+    sort_by = _prompt_select("Sort models by", _SORT_OPTIONS)
+    if sort_by == "cheapest":
+        models.sort(key=lambda m: m["input_usd_per_1m"])
+    elif sort_by == "name":
+        models.sort(key=lambda m: m["name"].lower())
+    elif sort_by == "context":
+        models.sort(key=lambda m: -(m.get("context_length") or 0))
+    # free_first is already the default from fetch_models
+
+    choices = [format_model_line(m) for m in models]
+    choices.append("custom  [enter a model slug manually]")
+
     try:
-        with _console.status("[dim]fetching models from OpenRouter…[/dim]", spinner="dots2"):
-            models = fetch_models(os.getenv("OPENROUTER_API_KEY"))
-        choices = []
-        for m in models:
-            price = format_price_label(m)
-            choices.append((m["id"], f"{m['name']}  [{price}]"))
-        choices.append(("custom", "Enter a model slug manually"))
-        return choices
-    except Exception:
-        return [
-            ("google/gemini-2.5-flash",         "Recommended — fast, reliable, ~$0.001/run"),
-            ("google/gemini-2.5-flash-lite",    "Cheaper Gemini, slightly less accurate"),
-            ("nvidia/nemotron-nano-12b-v2-vl:free", "Free — slow, 10-image limit (auto-batched)"),
-            ("google/gemma-4-31b-it:free",      "Free — may rate-limit, strong quality"),
-            ("custom",                          "Enter a model slug manually"),
-        ]
+        import questionary
+        result = questionary.autocomplete(
+            "Select model (type to search):",
+            choices=choices,
+            match_middle=True,
+            instruction="(type to filter  ↑↓ navigate  ↵ select)",
+        ).ask()
+        if result is None:
+            raise KeyboardInterrupt
+    except ImportError:
+        _console.print("\nAvailable models:")
+        for i, c in enumerate(choices, 1):
+            _console.print(f"  {i}) {c}")
+        raw = input("Choose [1]: ").strip()
+        idx = int(raw) - 1 if raw.isdigit() else 0
+        result = choices[max(0, min(idx, len(choices) - 1))]
+
+    # The model ID is the part before the first double-space
+    model_id = result.split("  ")[0].strip()
+    if model_id == "custom":
+        model_id = _prompt_str("Model slug (e.g. openai/gpt-4o)")
+    return model_id
 
 
 def _print_banner() -> None:
@@ -161,11 +190,7 @@ def interactive_args(video: Path | None) -> dict:
     if env_model:
         args["model"] = env_model
     elif interactive:
-        model_choices = _load_model_choices()
-        choice = _prompt_select("Select model", model_choices)
-        if choice == "custom":
-            choice = _prompt_str("Model slug (e.g. openai/gpt-4o)")
-        args["model"] = choice
+        args["model"] = _prompt_model()
     else:
         args["model"] = "google/gemini-2.5-flash"
 
