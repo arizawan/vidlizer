@@ -35,6 +35,11 @@ dependencies = [
 
 [project.optional-dependencies]
 transcribe = ["mlx-whisper>=0.4"]
+dev = [
+    "pytest>=8.0",
+    "pytest-html>=4.0",
+    "pytest-mock>=3.12",
+]
 
 [project.urls]
 Homepage = "https://github.com/arizawan/vidlizer"

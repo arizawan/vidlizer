@@ -289,8 +289,9 @@ def _post(
     if verbose:
         _dbg(f"[debug] POST stream=True payload={kb} KB")
 
+    _url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions")
     r = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
+        _url,
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
