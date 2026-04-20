@@ -16,55 +16,45 @@ from rich.text import Text
 _console = Console(stderr=True, highlight=False)
 
 
-_SORT_OPTIONS = [
-    ("free_first", "Free first, then cheapest"),
-    ("cheapest",   "Cheapest first"),
-    ("name",       "Name A → Z"),
-    ("context",    "Context length (largest first)"),
+# Curated list: reliable paid vision models only (no free-tier rate limits)
+_CURATED_MODELS = [
+    "google/gemini-2.5-flash",
+    "google/gemini-2.5-flash-lite",
+    "google/gemini-2.5-pro",
+    "openai/gpt-4o-mini",
+    "openai/gpt-4o",
 ]
+
+_MODEL_NOTES = {
+    "google/gemini-2.5-flash":      "Recommended — fast, accurate",
+    "google/gemini-2.5-flash-lite": "Cheaper, slightly less accurate",
+    "google/gemini-2.5-pro":        "Best quality, expensive",
+    "openai/gpt-4o-mini":           "OpenAI budget option",
+    "openai/gpt-4o":                "OpenAI flagship, expensive",
+}
 
 
 def _prompt_model() -> str:
-    """Interactive model picker: sort selector → searchable autocomplete."""
-    from vidlizer.models import fetch_models, format_model_line
+    """Simple curated model picker with live pricing."""
+    from vidlizer.models import fetch_models, format_price_label
 
-    with _console.status("[dim]fetching models from OpenRouter…[/dim]", spinner="dots2"):
-        models = fetch_models(os.getenv("OPENROUTER_API_KEY"))
+    with _console.status("[dim]fetching prices…[/dim]", spinner="dots2"):
+        all_models = fetch_models(os.getenv("OPENROUTER_API_KEY"))
 
-    sort_by = _prompt_select("Sort models by", _SORT_OPTIONS)
-    if sort_by == "cheapest":
-        models.sort(key=lambda m: m["input_usd_per_1m"])
-    elif sort_by == "name":
-        models.sort(key=lambda m: m["name"].lower())
-    elif sort_by == "context":
-        models.sort(key=lambda m: -(m.get("context_length") or 0))
-    # free_first is already the default from fetch_models
+    price_by_id = {m["id"]: format_price_label(m) for m in all_models}
 
-    choices = [format_model_line(m) for m in models]
-    choices.append("custom  [enter a model slug manually]")
+    choices = []
+    for mid in _CURATED_MODELS:
+        price = price_by_id.get(mid, "")
+        note = _MODEL_NOTES.get(mid, "")
+        desc = f"{note}  [{price}]" if price else note
+        choices.append((mid, desc))
+    choices.append(("custom", "Enter a model slug manually"))
 
-    try:
-        import questionary
-        result = questionary.autocomplete(
-            "Select model (type to search, ↑↓ navigate, ↵ select):",
-            choices=choices,
-            match_middle=True,
-        ).ask()
-        if result is None:
-            raise KeyboardInterrupt
-    except ImportError:
-        _console.print("\nAvailable models:")
-        for i, c in enumerate(choices, 1):
-            _console.print(f"  {i}) {c}")
-        raw = input("Choose [1]: ").strip()
-        idx = int(raw) - 1 if raw.isdigit() else 0
-        result = choices[max(0, min(idx, len(choices) - 1))]
-
-    # The model ID is the part before the first double-space
-    model_id = result.split("  ")[0].strip()
-    if model_id == "custom":
-        model_id = _prompt_str("Model slug (e.g. openai/gpt-4o)")
-    return model_id
+    choice = _prompt_select("Select model", choices)
+    if choice == "custom":
+        choice = _prompt_str("Model slug (e.g. openai/gpt-4o)")
+    return choice
 
 
 def _print_banner() -> None:
