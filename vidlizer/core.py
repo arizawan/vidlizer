@@ -747,8 +747,8 @@ def run(
         from vidlizer.transcribe import has_audio, is_available, transcribe
         if has_audio(video):
             if not is_available():
-                from vidlizer.bootstrap import ensure_faster_whisper
-                ensure_faster_whisper(_console)
+                from vidlizer.bootstrap import ensure_transcriber
+                ensure_transcriber(_console)
             if is_available():
                 with _console.status("[dim]transcribing audio…[/dim]", spinner="dots2"):
                     segments = transcribe(video)

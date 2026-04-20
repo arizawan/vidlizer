@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Optional audio transcription via faster-whisper.
+"""Audio transcription via Apple MLX Whisper (Neural Engine / GPU on M-series).
 
-Install: pip install vidlizer[transcribe]  or  pip install faster-whisper
+Install: pip install mlx-whisper  (auto-installed on first audio video)
 """
 from __future__ import annotations
 
 import subprocess
 import tempfile
 from pathlib import Path
+
+_MLX_REPO = "mlx-community/whisper-base-mlx"
 
 
 def has_audio(video: Path) -> bool:
@@ -31,19 +33,20 @@ def _extract_audio(video: Path, out: Path) -> bool:
 
 def is_available() -> bool:
     try:
-        import faster_whisper  # noqa: F401
+        import mlx_whisper  # noqa: F401
         return True
     except ImportError:
         return False
 
 
-def transcribe(video: Path, model_size: str = "base") -> list[dict] | None:
+def transcribe(video: Path, repo: str = _MLX_REPO) -> list[dict] | None:
     """
-    Return [{start, end, text}, ...] segments or None if faster-whisper unavailable.
-    First call downloads the model (~150 MB for 'base').
+    Return [{start, end, text}, ...] or None if mlx-whisper unavailable.
+    Uses Apple Neural Engine / GPU via MLX — fast on M-series Macs.
+    Model (~150 MB) is downloaded once and cached in ~/.cache/huggingface/.
     """
     try:
-        from faster_whisper import WhisperModel
+        import mlx_whisper
     except ImportError:
         return None
 
@@ -52,10 +55,9 @@ def transcribe(video: Path, model_size: str = "base") -> list[dict] | None:
         if not _extract_audio(video, wav):
             return None
 
-        model = WhisperModel(model_size, device="cpu", compute_type="int8")
-        segments, _ = model.transcribe(str(wav), beam_size=1, vad_filter=True)
+        result = mlx_whisper.transcribe(str(wav), path_or_hf_repo=repo, verbose=False)
         return [
-            {"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()}
-            for s in segments
-            if s.text.strip()
+            {"start": round(s["start"], 2), "end": round(s["end"], 2), "text": s["text"].strip()}
+            for s in result.get("segments", [])
+            if s["text"].strip()
         ]

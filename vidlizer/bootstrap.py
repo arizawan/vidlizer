@@ -40,21 +40,13 @@ def ensure_ffmpeg(console) -> bool:
     return _brew_install("ffmpeg", console)
 
 
-def ensure_faster_whisper(console) -> bool:
-    """Check for faster-whisper; pip-install if missing."""
+def ensure_transcriber(console) -> bool:
+    """Check for mlx-whisper (Apple MLX); pip-install if missing."""
     try:
-        import faster_whisper  # noqa: F401
+        import mlx_whisper  # noqa: F401
         return True
     except ImportError:
-        ok = _pip_install("faster-whisper", console)
-        if ok:
-            # Reload so the freshly installed package is importable this session
-            import importlib
-            try:
-                import faster_whisper  # noqa: F401
-            except ImportError:
-                pass
-        return ok
+        return _pip_install("mlx-whisper", console)
 
 
 def run_checks(console) -> None:
