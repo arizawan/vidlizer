@@ -12,10 +12,8 @@ dependencies = [
     "python-dotenv>=1.0",
     "questionary>=2.0",
     "rich>=13.0",
+    "pymupdf>=1.24",
 ]
-
-[project.optional-dependencies]
-pdf = ["pymupdf>=1.24"]
 
 [project.scripts]
 vidlizer = "vidlizer.cli:main"
