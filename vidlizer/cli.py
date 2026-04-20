@@ -222,7 +222,9 @@ def interactive_args(video: Path | None) -> dict:
 
     # --- Output path ---
     safe_stem = re.sub(r"[^a-z0-9]+", "-", video.stem.lower()).strip("-") or "output"
-    default_output = video.parent / f"{safe_stem}.analysis.json"
+    import tempfile as _tf
+    out_dir = Path.cwd() if str(video).startswith(_tf.gettempdir()) else video.parent
+    default_output = out_dir / f"{safe_stem}.analysis.json"
     if interactive:
         out_raw = _prompt_str("Output JSON path", str(default_output))
         args["output"] = Path(os.path.expanduser(out_raw))
