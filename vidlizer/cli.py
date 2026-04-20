@@ -18,21 +18,24 @@ from rich.text import Text
 _console = Console(stderr=True, highlight=False)
 
 
-# Curated list: reliable paid vision models only (no free-tier rate limits)
 _CURATED_MODELS = [
     "google/gemini-2.5-flash",
     "google/gemini-2.5-flash-lite",
     "google/gemini-2.5-pro",
     "openai/gpt-4o-mini",
     "openai/gpt-4o",
+    "nvidia/nemotron-nano-12b-v2-vl:free",
+    "google/gemma-4-31b-it:free",
 ]
 
 _MODEL_NOTES = {
-    "google/gemini-2.5-flash":      "Recommended — fast, accurate",
-    "google/gemini-2.5-flash-lite": "Cheaper, slightly less accurate",
-    "google/gemini-2.5-pro":        "Best quality, expensive",
-    "openai/gpt-4o-mini":           "OpenAI budget option",
-    "openai/gpt-4o":                "OpenAI flagship, expensive",
+    "google/gemini-2.5-flash":             "Recommended — fast, accurate",
+    "google/gemini-2.5-flash-lite":        "Cheaper, slightly less accurate",
+    "google/gemini-2.5-pro":               "Best quality, expensive",
+    "openai/gpt-4o-mini":                  "OpenAI budget option",
+    "openai/gpt-4o":                       "OpenAI flagship, expensive",
+    "nvidia/nemotron-nano-12b-v2-vl:free": "Free ⚡ rate-limited, 10-image cap (auto-batched)",
+    "google/gemma-4-31b-it:free":          "Free ⚡ rate-limited, may be slow",
 }
 
 
@@ -253,6 +256,14 @@ def interactive_args(video: Path | None) -> dict:
 
 
 def main() -> int:
+    try:
+        return _main()
+    except KeyboardInterrupt:
+        _console.print("\n[dim]cancelled[/dim]")
+        return 130
+
+
+def _main() -> int:
     load_dotenv()
 
     import argparse
