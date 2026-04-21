@@ -51,6 +51,8 @@ def _resolve_model(provider: str, model: str) -> str:
         return model
     if provider == "ollama":
         return os.getenv("OLLAMA_MODEL", "qwen2.5vl:3b")
+    if provider == "openai":
+        return os.getenv("OPENAI_MODEL", "")
     return os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
 
 

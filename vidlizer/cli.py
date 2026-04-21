@@ -66,9 +66,10 @@ def _prompt_model() -> str:
 
 
 def _prompt_provider() -> str:
-    """Ask user to choose between local Ollama and cloud OpenRouter."""
+    """Ask user to choose a provider."""
     choices = [
-        ("ollama",      "Local — Ollama (no API key, no cost, runs on your machine)"),
+        ("ollama",      "Local — Ollama (no API key, no cost)"),
+        ("openai",      "Local — OpenAI-compatible (LM Studio, vLLM, LocalAI, real OpenAI)"),
         ("openrouter",  "Cloud — OpenRouter (API key required, pay-per-use)"),
     ]
     return _prompt_select("Select provider", choices)
@@ -292,6 +293,16 @@ def interactive_args(video: Path | None, output_format: str = "json") -> dict:
             args["model"] = _prompt_ollama_model()
         else:
             args["model"] = "qwen2.5vl:3b"
+    elif _provider == "openai":
+        env_model = os.getenv("OPENAI_MODEL")
+        if env_model:
+            args["model"] = env_model
+        elif interactive:
+            base = os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
+            _console.print(f"  [dim]endpoint: {base}[/dim]")
+            args["model"] = _prompt_str("Model name (as shown in LM Studio / your server)", "")
+        else:
+            args["model"] = os.getenv("OPENAI_MODEL", "")
     else:
         env_model = os.getenv("OPENROUTER_MODEL")
         if env_model:
@@ -374,8 +385,8 @@ def _main() -> int:
     p.add_argument("--format", choices=["json", "summary", "markdown"], default="json",
                    dest="output_format", metavar="FORMAT",
                    help="Output format: json (default), summary (plain text), markdown")
-    p.add_argument("--provider", choices=["openrouter", "ollama"], default=None,
-                   help="AI provider: openrouter (default, cloud) or ollama (local, no API key)")
+    p.add_argument("--provider", choices=["openrouter", "ollama", "openai"], default=None,
+                   help="AI provider: openrouter (cloud), ollama (local), openai (LM Studio/vLLM/any OpenAI-compat)")
     cli = p.parse_args()
 
     if cli.provider:

@@ -400,10 +400,15 @@ def _post(
     endpoint: str | None = None,
     req_headers: dict | None = None,
     is_ollama: bool = False,
+    no_stream_opts: bool = False,
 ) -> dict:
     if is_ollama:
         return _post_ollama(model, payload, timeout, verbose, tracker, label, n_frames, endpoint)
-    stream_payload = {**payload, "stream": True, "stream_options": {"include_usage": True}}
+    # stream_options not supported by many local OpenAI-compat servers (LM Studio, vLLM, etc.)
+    if no_stream_opts:
+        stream_payload = {**payload, "stream": True}
+    else:
+        stream_payload = {**payload, "stream": True, "stream_options": {"include_usage": True}}
     payload_bytes = json.dumps(stream_payload).encode()
     kb = len(payload_bytes) // 1024
 
@@ -528,6 +533,8 @@ def call_openrouter(
     endpoint: str | None = None,
     req_headers: dict | None = None,
     is_ollama: bool = False,
+    no_stream_opts: bool = False,
+    no_json_format: bool = False,
 ) -> dict:
     """Send frames to OpenRouter. Auto-retries with batching on image-limit errors."""
     if _depth > _MAX_RECURSION_DEPTH:
@@ -554,12 +561,13 @@ def call_openrouter(
             "messages": [{"role": "user", "content": content}],
             "temperature": 0.1,
         }
-        if not is_ollama:
+        if not is_ollama and not no_json_format:
             _payload["response_format"] = {"type": "json_object"}
         try:
             body = _post(api_key, model, _payload, timeout, verbose, tracker,
                          label="[1/1]", n_frames=len(frames),
-                         endpoint=endpoint, req_headers=req_headers, is_ollama=is_ollama)
+                         endpoint=endpoint, req_headers=req_headers, is_ollama=is_ollama,
+                         no_stream_opts=no_stream_opts)
             result = parse_json(body["choices"][0]["message"]["content"])
             _console.print(
                 f"  [green]✓[/green] [bold][1/1][/bold]  "
@@ -570,7 +578,8 @@ def call_openrouter(
             auto_batch = max(1, len(frames) // 5)
             _warn(f"image limit hit — auto-batching at [bold]{auto_batch}[/bold] frames/request")
             return call_openrouter(api_key, model, frames, timeout, verbose, auto_batch, tracker, _depth + 1,
-                                   timestamps=timestamps, endpoint=endpoint, req_headers=req_headers, is_ollama=is_ollama)
+                                   timestamps=timestamps, endpoint=endpoint, req_headers=req_headers,
+                                   is_ollama=is_ollama, no_stream_opts=no_stream_opts, no_json_format=no_json_format)
 
     # Batched: merge flow arrays across chunks
     all_steps: list[dict] = []
@@ -598,17 +607,19 @@ def call_openrouter(
             "messages": [{"role": "user", "content": content}],
             "temperature": 0.1,
         }
-        if not is_ollama:
+        if not is_ollama and not no_json_format:
             _chunk_payload["response_format"] = {"type": "json_object"}
         try:
             body = _post(api_key, model, _chunk_payload, timeout, verbose, tracker,
                          label=label, n_frames=len(chunk),
-                         endpoint=endpoint, req_headers=req_headers, is_ollama=is_ollama)
+                         endpoint=endpoint, req_headers=req_headers, is_ollama=is_ollama,
+                         no_stream_opts=no_stream_opts)
         except ImageLimitError:
             smaller = max(1, len(chunk) // 2)
             _warn(f"chunk {i+1} hit image limit — re-splitting to batch_size={smaller}")
             sub = call_openrouter(api_key, model, chunk, timeout, verbose, smaller, tracker, _depth + 1,
-                                  timestamps=chunk_ts, endpoint=endpoint, req_headers=req_headers, is_ollama=is_ollama)
+                                  timestamps=chunk_ts, endpoint=endpoint, req_headers=req_headers,
+                                  is_ollama=is_ollama, no_stream_opts=no_stream_opts, no_json_format=no_json_format)
             for j, step in enumerate(sub.get("flow", [])):
                 step["step"] = step_offset + j
             all_steps.extend(sub.get("flow", []))
@@ -753,6 +764,7 @@ def run(
 
     _provider = (provider or os.getenv("PROVIDER", "ollama")).lower()
     _is_ollama = _provider == "ollama"
+    _is_openai_compat = _provider == "openai"  # LM Studio, vLLM, LocalAI, real OpenAI, etc.
 
     if not shutil.which("ffmpeg"):
         _err("ffmpeg not found on PATH")
@@ -772,6 +784,17 @@ def run(
             _warn(f"Ollama not reachable at {_ollama_host} — start with: [cyan]ollama serve[/cyan]")
         elif not any(i.split(":")[0] == model.split(":")[0] for i in _installed):
             _warn(f"model [bold]{model}[/bold] not installed — run: [cyan]ollama pull {model}[/cyan]")
+    elif _is_openai_compat:
+        _base = os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1").rstrip("/")
+        _endpoint = f"{_base}/chat/completions"
+        _api_key = os.getenv("OPENAI_API_KEY", "lm-studio")
+        _req_headers = {
+            "Authorization": f"Bearer {_api_key}",
+            "Content-Type": "application/json",
+        }
+        api_key = _api_key
+        _live_models = []
+        _info(f"provider: [bold]openai-compat[/bold]  [dim]{_base}[/dim]")
     else:
         _endpoint = None
         _req_headers = None
@@ -783,16 +806,16 @@ def run(
         with _console.status("[dim]fetching model pricing…[/dim]", spinner="dots2"):
             _live_models = fetch_models(api_key)
 
-    # Local models handle one image at a time — force per-frame batching
-    if _is_ollama and batch_size == 0:
+    # Local providers: default batch_size=1 (safe for any local model)
+    if (_is_ollama or _is_openai_compat) and batch_size == 0:
         batch_size = 1
-        _info("Ollama: auto-set [bold]batch_size=1[/bold] (local models process one frame at a time)")
+        _info("local: auto-set [bold]batch_size=1[/bold] (override with --batch-size)")
 
     # Money-bleeding guardrails
     if max_frames > 200:
         _warn(f"max_frames={max_frames} is high — runaway-cost risk. Capping to 200.")
         max_frames = 200
-    if not _is_ollama:
+    if not _is_ollama and not _is_openai_compat:
         inp_rate, out_rate = get_pricing(model, _live_models)
         if inp_rate > _EXPENSIVE_THRESHOLD_USD_PER_1M:
             _warn(f"[bold]{model}[/bold] is an expensive model "
@@ -888,6 +911,7 @@ def run(
                         api_key, m, frames, timeout, v, batch_size, trk,
                         is_image=is_image, timestamps=frame_timestamps,
                         endpoint=_endpoint, req_headers=_req_headers, is_ollama=_is_ollama,
+                        no_stream_opts=_is_openai_compat, no_json_format=_is_openai_compat,
                     ), 0
                 except CostCapExceeded as e:
                     _err(str(e))
