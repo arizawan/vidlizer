@@ -12,10 +12,9 @@ import tempfile
 import time
 from pathlib import Path
 
-import sys
-
 import requests
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
@@ -313,47 +312,52 @@ def _post(
 
     full_content = ""
     usage: dict = {}
+    _start = time.time()
+    _chars = 0
 
-    sys.stderr.write("   \033[2m")  # indent + dim ANSI
-    sys.stderr.flush()
+    def _live_text() -> Text:
+        t = Text()
+        t.append(f"   {label}", style="bold")
+        if n_frames:
+            t.append(f"  {n_frames}f", style="white")
+        t.append(f"  {time.time() - _start:.1f}s", style="dim")
+        if _chars:
+            t.append(f"  {_chars:,} chars", style="dim")
+        return t
 
-    for raw_line in r.iter_lines():
-        if not raw_line:
-            continue
-        line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
-        if not line.startswith("data: "):
-            continue
-        data_str = line[6:]
-        if data_str.strip() == "[DONE]":
-            break
-        try:
-            chunk = json.loads(data_str)
-        except json.JSONDecodeError:
-            continue
+    with Live(_live_text(), console=_console, refresh_per_second=4, transient=True) as live:
+        for raw_line in r.iter_lines():
+            if not raw_line:
+                continue
+            line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+            if not line.startswith("data: "):
+                continue
+            data_str = line[6:]
+            if data_str.strip() == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
 
-        if chunk.get("usage"):
-            usage = chunk["usage"]
+            if chunk.get("usage"):
+                usage = chunk["usage"]
 
-        if "error" in chunk:
-            sys.stderr.write("\033[0m\n")
-            sys.stderr.flush()
-            err = chunk["error"]
-            err_str = json.dumps(err) if isinstance(err, dict) else str(err)
-            if "image" in err_str.lower() and ("most" in err_str.lower() or "limit" in err_str.lower()):
-                raise ImageLimitError(err_str)
-            raise RuntimeError(f"OpenRouter error: {err_str}")
+            if "error" in chunk:
+                err = chunk["error"]
+                err_str = json.dumps(err) if isinstance(err, dict) else str(err)
+                if "image" in err_str.lower() and ("most" in err_str.lower() or "limit" in err_str.lower()):
+                    raise ImageLimitError(err_str)
+                raise RuntimeError(f"OpenRouter error: {err_str}")
 
-        choices = chunk.get("choices") or []
-        if choices:
-            delta = choices[0].get("delta") or {}
-            piece = delta.get("content") or ""
-            if piece:
-                full_content += piece
-                sys.stderr.write(piece)
-                sys.stderr.flush()
-
-    sys.stderr.write("\033[0m\n")  # reset + newline
-    sys.stderr.flush()
+            choices = chunk.get("choices") or []
+            if choices:
+                delta = choices[0].get("delta") or {}
+                piece = delta.get("content") or ""
+                if piece:
+                    full_content += piece
+                    _chars += len(piece)
+                    live.update(_live_text())
 
     if tracker:
         batch_cost = tracker.add(model, usage)  # may raise CostCapExceeded
@@ -593,6 +597,8 @@ def run(
     start: float | None = None,
     end: float | None = None,
     dedup_threshold: int = _DEDUP_DEFAULT,
+    no_transcript: bool = False,
+    output_format: str = "json",
 ) -> int:
     global _live_models
     v = verbose
@@ -691,7 +697,8 @@ def run(
         cached = _cache.get(video if not is_image else video, cache_params)
         if cached is not None:
             _info("[dim]cache hit[/dim]")
-            output.write_text(json.dumps(cached, indent=2, ensure_ascii=False))
+            from vidlizer.formatter import format_output
+            output.write_text(format_output(cached, output_format))
             _show_result_preview(cached)
             steps_c = len(cached.get("flow", []))
             _console.print(Panel(
@@ -744,7 +751,7 @@ def run(
         _warn("model returned 0 steps — check --verbose output for clues")
 
     # Transcription — auto-runs for any video with an audio track
-    if not is_image and not is_pdf:
+    if not is_image and not is_pdf and not no_transcript:
         from vidlizer.transcribe import has_audio, is_available, transcribe
         if has_audio(video):
             if not is_available():
@@ -759,7 +766,9 @@ def run(
                     _info(f"transcript: [bold]{len(segments)} segments[/bold]  (merged into flow steps)")
 
     _cache.put(video, cache_params, data)
-    output.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+
+    from vidlizer.formatter import format_output
+    output.write_text(format_output(data, output_format))
 
     _console.print()
     _show_result_preview(data)

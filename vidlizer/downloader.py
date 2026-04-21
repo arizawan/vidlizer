@@ -13,6 +13,11 @@ _SUPPORTED_DOMAINS = (
     "vimeo.com",
     "twitter.com", "x.com",
 )
+_YOUTUBE_DOMAINS = ("youtube.com", "youtu.be")
+
+
+def _is_youtube(url: str) -> bool:
+    return any(d in url for d in _YOUTUBE_DOMAINS)
 
 
 def is_url(s: str) -> bool:
@@ -39,29 +44,31 @@ def download(url: str, out_dir: Path) -> Path:
     """Download video to out_dir. Returns path to the downloaded file."""
     YDL = _ydl()
     tmpl = str(out_dir / "%(id)s.%(ext)s")
-    opts = {
+    opts: dict = {
         "format": "bestvideo+bestaudio/best",
         "merge_output_format": "mp4",
         "outtmpl": tmpl,
         "quiet": True,
         "no_playlist": True,
         "noplaylist": True,
-        # android_vr is JS-less: no n-challenge, no PO token needed
-        "extractor_args": {"youtube": {"player_client": ["android_vr"]}},
     }
+    if _is_youtube(url):
+        # android_vr is JS-less: no n-challenge, no PO token needed
+        opts["extractor_args"] = {"youtube": {"player_client": ["android_vr"]}}
 
     if YDL is not None:
         with YDL(opts) as ydl:
             ydl.download([url])
     else:
         import subprocess
-        r = subprocess.run(
-            ["yt-dlp", "--no-playlist", "-f", "bestvideo+bestaudio/best",
-             "--merge-output-format", "mp4",
-             "--extractor-args", "youtube:player_client=android_vr",
-             "-o", tmpl, url],
-            capture_output=True, text=True,
-        )
+        cmd = [
+            "yt-dlp", "--no-playlist", "-f", "bestvideo+bestaudio/best",
+            "--merge-output-format", "mp4",
+        ]
+        if _is_youtube(url):
+            cmd += ["--extractor-args", "youtube:player_client=android_vr"]
+        cmd += ["-o", tmpl, url]
+        r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             raise RuntimeError(f"yt-dlp: {r.stderr[:500]}")
 
@@ -77,8 +84,10 @@ def get_metadata(url: str) -> dict:
         YDL = _ydl()
         if YDL is None:
             return {"url": url}
-        with YDL({"skip_download": True, "quiet": True, "no_playlist": True,
-                   "extractor_args": {"youtube": {"player_client": ["android_vr"]}}}) as ydl:
+        meta_opts: dict = {"skip_download": True, "quiet": True, "no_playlist": True}
+        if _is_youtube(url):
+            meta_opts["extractor_args"] = {"youtube": {"player_client": ["android_vr"]}}
+        with YDL(meta_opts) as ydl:
             info = ydl.extract_info(url, download=False) or {}
             return {
                 "title": info.get("title"),

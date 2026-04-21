@@ -199,7 +199,7 @@ def _pick_file_gui() -> Path | None:
         return None
 
 
-def interactive_args(video: Path | None) -> dict:
+def interactive_args(video: Path | None, output_format: str = "json") -> dict:
     """Ask for any missing configuration interactively."""
     load_dotenv()
     interactive = _is_interactive()
@@ -224,9 +224,10 @@ def interactive_args(video: Path | None) -> dict:
     safe_stem = re.sub(r"[^a-z0-9]+", "-", video.stem.lower()).strip("-") or "output"
     import tempfile as _tf
     out_dir = Path.cwd() if str(video).startswith(_tf.gettempdir()) else video.parent
-    default_output = out_dir / f"{safe_stem}.analysis.json"
+    _ext = ".analysis.md" if output_format == "markdown" else ".analysis.txt" if output_format == "summary" else ".analysis.json"
+    default_output = out_dir / f"{safe_stem}{_ext}"
     if interactive:
-        out_raw = _prompt_str("Output JSON path", str(default_output))
+        out_raw = _prompt_str("Output path", str(default_output))
         args["output"] = Path(os.path.expanduser(out_raw))
     else:
         args["output"] = default_output
@@ -266,6 +267,8 @@ def interactive_args(video: Path | None) -> dict:
     args["start"] = None
     args["end"] = None
     args["dedup_threshold"] = 8
+    args["no_transcript"] = False
+    args["output_format"] = "json"
 
     return args
 
@@ -308,6 +311,9 @@ def _main() -> int:
                    help="Skip audio transcription even if faster-whisper is installed")
     p.add_argument("--dedup-threshold", type=int, default=None, dest="dedup_threshold",
                    help="Perceptual dedup Hamming threshold (default 8, 0=off)")
+    p.add_argument("--format", choices=["json", "summary", "markdown"], default="json",
+                   dest="output_format", metavar="FORMAT",
+                   help="Output format: json (default), summary (plain text), markdown")
     cli = p.parse_args()
 
     _print_banner()
@@ -340,7 +346,7 @@ def _main() -> int:
 
     with url_ctx:
         # Build args: interactive fills missing values
-        iargs = interactive_args(video_path)
+        iargs = interactive_args(video_path, output_format=cli.output_format)
 
         # CLI flags override interactive answers
         if cli.output:                       iargs["output"] = cli.output
@@ -357,6 +363,8 @@ def _main() -> int:
         if cli.end is not None:              iargs["end"] = cli.end
         if cli.dedup_threshold is not None:  iargs["dedup_threshold"] = cli.dedup_threshold
         if cli.verbose:                      iargs["verbose"] = True
+        if cli.no_transcript:                iargs["no_transcript"] = True
+        iargs["output_format"] = cli.output_format
 
         _print_config(iargs)
         _console.print(Rule(style="dim"))

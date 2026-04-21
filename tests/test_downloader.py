@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from vidlizer.downloader import is_supported, is_url
+from vidlizer.downloader import is_supported, is_url, _is_youtube
 
 
 @pytest.mark.parametrize("url", [
@@ -49,3 +49,20 @@ def test_is_supported_unknown_platform(url):
 
 def test_is_supported_requires_http():
     assert not is_supported("youtube.com/watch?v=abc")
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.youtube.com/watch?v=abc",
+    "https://youtu.be/abc",
+])
+def test_is_youtube_true(url):
+    assert _is_youtube(url)
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.loom.com/share/abc",
+    "https://vimeo.com/123",
+    "https://twitter.com/user/status/123",
+])
+def test_is_youtube_false_for_other_platforms(url):
+    assert not _is_youtube(url)
