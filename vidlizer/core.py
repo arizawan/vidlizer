@@ -266,8 +266,130 @@ class ImageLimitError(RuntimeError):
     pass
 
 
+def _post_ollama(
+    model: str,
+    payload: dict,
+    timeout: int,
+    verbose: bool,
+    tracker: CostTracker | None,
+    label: str,
+    n_frames: int,
+    endpoint: str | None,
+) -> dict:
+    """Post to Ollama native /api/chat with native image format (newline-delimited JSON streaming)."""
+    # Convert OpenAI content array → Ollama native: text string + images[] of raw base64
+    native_messages = []
+    for msg in payload.get("messages", []):
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            text_parts: list[str] = []
+            images: list[str] = []
+            for part in content:
+                if part.get("type") == "text":
+                    text_parts.append(part["text"])
+                elif part.get("type") == "image_url":
+                    url = part["image_url"]["url"]
+                    # Strip "data:image/jpeg;base64," prefix
+                    if "," in url:
+                        url = url.split(",", 1)[1]
+                    images.append(url)
+            native_msg: dict = {"role": msg["role"], "content": "\n".join(text_parts)}
+            if images:
+                native_msg["images"] = images
+        else:
+            native_msg = {"role": msg["role"], "content": str(content)}
+        native_messages.append(native_msg)
+
+    native_payload = {
+        "model": model,
+        "messages": native_messages,
+        "stream": True,
+        "format": "json",
+        "options": {"temperature": 0, "num_ctx": 8192, "num_predict": 1024},
+    }
+
+    _url = endpoint or "http://localhost:11434/api/chat"
+    payload_bytes = json.dumps(native_payload).encode()
+    kb = len(payload_bytes) // 1024
+
+    frame_info = f"  [white]{n_frames}f[/white]" if n_frames else ""
+    _console.print(
+        f"[cyan]→[/cyan] [bold]{label}[/bold]{frame_info}  "
+        f"[dim]{kb} KB[/dim]  [dim]→[/dim]  [magenta]{model}[/magenta]"
+    )
+    if verbose:
+        _dbg(f"[debug] Ollama native POST {_url} {kb} KB")
+
+    r = requests.post(
+        _url,
+        headers={"Content-Type": "application/json"},
+        data=payload_bytes,
+        timeout=timeout,
+        stream=True,
+    )
+
+    if not r.ok:
+        raise RuntimeError(f"Ollama {r.status_code}: {r.text[:500]}")
+
+    full_content = ""
+    usage: dict = {}
+    _start = time.time()
+    _chars = 0
+
+    def _ollama_live() -> Text:
+        t = Text()
+        t.append(f"   {label}", style="bold")
+        if n_frames:
+            t.append(f"  {n_frames}f", style="white")
+        t.append(f"  {time.time() - _start:.1f}s", style="dim")
+        if _chars:
+            t.append(f"  {_chars:,} chars", style="dim")
+        return t
+
+    with Live(_ollama_live(), console=_console, refresh_per_second=4, transient=True) as live:
+        for raw_line in r.iter_lines():
+            if not raw_line:
+                continue
+            line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+            try:
+                chunk = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            if chunk.get("error"):
+                raise RuntimeError(f"Ollama error: {chunk['error']}")
+
+            piece = chunk.get("message", {}).get("content", "")
+            if piece:
+                full_content += piece
+                _chars += len(piece)
+                live.update(_ollama_live())
+
+            if chunk.get("done"):
+                usage = {
+                    "prompt_tokens": chunk.get("prompt_eval_count", 0) or 0,
+                    "completion_tokens": chunk.get("eval_count", 0) or 0,
+                }
+
+    if tracker:
+        batch_cost = tracker.add(model, usage)
+    else:
+        batch_cost = 0.0
+
+    pt = usage.get("prompt_tokens", 0) or 0
+    ct = usage.get("completion_tokens", 0) or 0
+    _console.print(
+        f"   [dim]tokens:[/dim] [cyan]{pt:,}[/cyan][dim]↑[/dim]  "
+        f"[cyan]{ct:,}[/cyan][dim]↓[/dim]  [cyan]free[/cyan]"
+    )
+    if verbose:
+        _dbg(f"[debug] Ollama stream done, {len(full_content)} chars")
+
+    return {"choices": [{"message": {"content": full_content}}], "usage": usage}
+
+
 def _post(
-    api_key: str,
+    api_key: str | None,
     model: str,
     payload: dict,
     timeout: int,
@@ -275,7 +397,12 @@ def _post(
     tracker: CostTracker | None = None,
     label: str = "",
     n_frames: int = 0,
+    endpoint: str | None = None,
+    req_headers: dict | None = None,
+    is_ollama: bool = False,
 ) -> dict:
+    if is_ollama:
+        return _post_ollama(model, payload, timeout, verbose, tracker, label, n_frames, endpoint)
     stream_payload = {**payload, "stream": True, "stream_options": {"include_usage": True}}
     payload_bytes = json.dumps(stream_payload).encode()
     kb = len(payload_bytes) // 1024
@@ -288,15 +415,16 @@ def _post(
     if verbose:
         _dbg(f"[debug] POST stream=True payload={kb} KB")
 
-    _url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions")
+    _url = endpoint or os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions")
+    _headers = req_headers or {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/arizawan/vidlizer",
+        "X-Title": "vidlizer",
+    }
     r = requests.post(
         _url,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/arizawan/vidlizer",
-            "X-Title": "vidlizer",
-        },
+        headers=_headers,
         data=payload_bytes,
         timeout=timeout,
         stream=True,
@@ -308,7 +436,7 @@ def _post(
         err_text = r.text[:1000]
         if "image" in err_text.lower() and ("most" in err_text.lower() or "limit" in err_text.lower()):
             raise ImageLimitError(err_text)
-        raise RuntimeError(f"OpenRouter {r.status_code}: {err_text}")
+        raise RuntimeError(f"API {r.status_code}: {err_text}")
 
     full_content = ""
     usage: dict = {}
@@ -348,7 +476,7 @@ def _post(
                 err_str = json.dumps(err) if isinstance(err, dict) else str(err)
                 if "image" in err_str.lower() and ("most" in err_str.lower() or "limit" in err_str.lower()):
                     raise ImageLimitError(err_str)
-                raise RuntimeError(f"OpenRouter error: {err_str}")
+                raise RuntimeError(f"API error: {err_str}")
 
             choices = chunk.get("choices") or []
             if choices:
@@ -387,7 +515,7 @@ _MAX_RECURSION_DEPTH = 4
 
 
 def call_openrouter(
-    api_key: str,
+    api_key: str | None,
     model: str,
     frames: list[Path],
     timeout: int,
@@ -397,6 +525,9 @@ def call_openrouter(
     _depth: int = 0,
     is_image: bool = False,
     timestamps: list[float] | None = None,
+    endpoint: str | None = None,
+    req_headers: dict | None = None,
+    is_ollama: bool = False,
 ) -> dict:
     """Send frames to OpenRouter. Auto-retries with batching on image-limit errors."""
     if _depth > _MAX_RECURSION_DEPTH:
@@ -418,13 +549,17 @@ def call_openrouter(
         # Single request
         content = _build_content(PROMPT_IMAGE if is_image else PROMPT, frames, timestamps)
         tracker.batches_total = 1
+        _payload: dict = {
+            "model": model,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": 0.1,
+        }
+        if not is_ollama:
+            _payload["response_format"] = {"type": "json_object"}
         try:
-            body = _post(api_key, model, {
-                "model": model,
-                "messages": [{"role": "user", "content": content}],
-                "response_format": {"type": "json_object"},
-                "temperature": 0.1,
-            }, timeout, verbose, tracker, label="[1/1]", n_frames=len(frames))
+            body = _post(api_key, model, _payload, timeout, verbose, tracker,
+                         label="[1/1]", n_frames=len(frames),
+                         endpoint=endpoint, req_headers=req_headers, is_ollama=is_ollama)
             result = parse_json(body["choices"][0]["message"]["content"])
             _console.print(
                 f"  [green]✓[/green] [bold][1/1][/bold]  "
@@ -434,7 +569,8 @@ def call_openrouter(
         except ImageLimitError:
             auto_batch = max(1, len(frames) // 5)
             _warn(f"image limit hit — auto-batching at [bold]{auto_batch}[/bold] frames/request")
-            return call_openrouter(api_key, model, frames, timeout, verbose, auto_batch, tracker, _depth + 1, timestamps=timestamps)
+            return call_openrouter(api_key, model, frames, timeout, verbose, auto_batch, tracker, _depth + 1,
+                                   timestamps=timestamps, endpoint=endpoint, req_headers=req_headers, is_ollama=is_ollama)
 
     # Batched: merge flow arrays across chunks
     all_steps: list[dict] = []
@@ -457,17 +593,22 @@ def call_openrouter(
         )
         content = _build_content(prompt_text, chunk, chunk_ts)
 
+        _chunk_payload: dict = {
+            "model": model,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": 0.1,
+        }
+        if not is_ollama:
+            _chunk_payload["response_format"] = {"type": "json_object"}
         try:
-            body = _post(api_key, model, {
-                "model": model,
-                "messages": [{"role": "user", "content": content}],
-                "response_format": {"type": "json_object"},
-                "temperature": 0.1,
-            }, timeout, verbose, tracker, label=label, n_frames=len(chunk))
+            body = _post(api_key, model, _chunk_payload, timeout, verbose, tracker,
+                         label=label, n_frames=len(chunk),
+                         endpoint=endpoint, req_headers=req_headers, is_ollama=is_ollama)
         except ImageLimitError:
             smaller = max(1, len(chunk) // 2)
             _warn(f"chunk {i+1} hit image limit — re-splitting to batch_size={smaller}")
-            sub = call_openrouter(api_key, model, chunk, timeout, verbose, smaller, tracker, _depth + 1, timestamps=chunk_ts)
+            sub = call_openrouter(api_key, model, chunk, timeout, verbose, smaller, tracker, _depth + 1,
+                                  timestamps=chunk_ts, endpoint=endpoint, req_headers=req_headers, is_ollama=is_ollama)
             for j, step in enumerate(sub.get("flow", [])):
                 step["step"] = step_offset + j
             all_steps.extend(sub.get("flow", []))
@@ -509,6 +650,12 @@ def parse_json(text: str | dict) -> dict:
     if isinstance(text, dict):
         return text
     text = text.strip()
+    if not text:
+        raise json.JSONDecodeError(
+            "model returned empty response — "
+            "model may not support vision or context window exceeded",
+            "", 0,
+        )
     if text.startswith("```"):
         text = text.split("```", 2)[1]
         if text.startswith("json"):
@@ -599,32 +746,58 @@ def run(
     dedup_threshold: int = _DEDUP_DEFAULT,
     no_transcript: bool = False,
     output_format: str = "json",
+    provider: str = "",
 ) -> int:
     global _live_models
     v = verbose
 
+    _provider = (provider or os.getenv("PROVIDER", "ollama")).lower()
+    _is_ollama = _provider == "ollama"
+
     if not shutil.which("ffmpeg"):
         _err("ffmpeg not found on PATH")
         return 2
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
-        _err("OPENROUTER_API_KEY missing (set in .env or export in shell)")
-        return 2
 
-    # Fetch live model pricing (cached 1h)
-    from vidlizer.models import fetch_models
-    with _console.status("[dim]fetching model pricing…[/dim]", spinner="dots2"):
-        _live_models = fetch_models(api_key)
+    if _is_ollama:
+        _ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        _endpoint: str | None = f"{_ollama_host}/api/chat"
+        _req_headers: dict | None = None
+        api_key = None
+        _live_models = []
+        _info(f"provider: [bold]ollama[/bold]  [dim]{_ollama_host}[/dim]")
+        from vidlizer.models import fetch_ollama_models as _fetch_ollama
+        with _console.status("[dim]checking Ollama…[/dim]", spinner="dots2"):
+            _installed = _fetch_ollama(_ollama_host)
+        if not _installed:
+            _warn(f"Ollama not reachable at {_ollama_host} — start with: [cyan]ollama serve[/cyan]")
+        elif not any(i.split(":")[0] == model.split(":")[0] for i in _installed):
+            _warn(f"model [bold]{model}[/bold] not installed — run: [cyan]ollama pull {model}[/cyan]")
+    else:
+        _endpoint = None
+        _req_headers = None
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            _err("OPENROUTER_API_KEY missing (set in .env or export in shell)")
+            return 2
+        from vidlizer.models import fetch_models
+        with _console.status("[dim]fetching model pricing…[/dim]", spinner="dots2"):
+            _live_models = fetch_models(api_key)
+
+    # Local models handle one image at a time — force per-frame batching
+    if _is_ollama and batch_size == 0:
+        batch_size = 1
+        _info("Ollama: auto-set [bold]batch_size=1[/bold] (local models process one frame at a time)")
 
     # Money-bleeding guardrails
     if max_frames > 200:
         _warn(f"max_frames={max_frames} is high — runaway-cost risk. Capping to 200.")
         max_frames = 200
-    inp_rate, out_rate = get_pricing(model, _live_models)
-    if inp_rate > _EXPENSIVE_THRESHOLD_USD_PER_1M:
-        _warn(f"[bold]{model}[/bold] is an expensive model "
-              f"(${inp_rate:.2f}/M input, ${out_rate:.2f}/M output). "
-              f"Cost cap: [bold]${max_cost:.2f}[/bold]")
+    if not _is_ollama:
+        inp_rate, out_rate = get_pricing(model, _live_models)
+        if inp_rate > _EXPENSIVE_THRESHOLD_USD_PER_1M:
+            _warn(f"[bold]{model}[/bold] is an expensive model "
+                  f"(${inp_rate:.2f}/M input, ${out_rate:.2f}/M output). "
+                  f"Cost cap: [bold]${max_cost:.2f}[/bold]")
 
     import contextlib
 
@@ -711,7 +884,11 @@ def run(
             """Run up to 3 attempts. Returns (data, rc) where rc=-1 means exhausted."""
             for attempt in range(1, 4):
                 try:
-                    return call_openrouter(api_key, m, frames, timeout, v, batch_size, trk, is_image=is_image, timestamps=frame_timestamps), 0
+                    return call_openrouter(
+                        api_key, m, frames, timeout, v, batch_size, trk,
+                        is_image=is_image, timestamps=frame_timestamps,
+                        endpoint=_endpoint, req_headers=_req_headers, is_ollama=_is_ollama,
+                    ), 0
                 except CostCapExceeded as e:
                     _err(str(e))
                     _warn("partial run — no output written. Raise MAX_COST_USD or use a cheaper model.")

@@ -50,7 +50,7 @@ def test_full_pipeline_youtube_url(tmp_path):
          _YT_URL, "-o", str(out), "--no-transcript",
          "--max-frames", "5", "--fps", "0.5"],
         capture_output=True, text=True, timeout=180,
-        env={**os.environ, "OPENROUTER_MODEL": "google/gemini-2.5-flash"},
+        env={**os.environ, "PROVIDER": "openrouter", "OPENROUTER_MODEL": "google/gemini-2.5-flash"},
         cwd=str(tmp_path),
     )
     assert r.returncode == 0, f"stderr:\n{r.stderr[-3000:]}"

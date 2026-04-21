@@ -110,6 +110,7 @@ def test_full_run_via_cli(test_video, tmp_path, mock_openrouter_server):
     out = tmp_path / "cli-result.json"
     env = {
         **os.environ,
+        "PROVIDER": "openrouter",
         "OPENROUTER_API_KEY": "sk-test-key",
         "OPENROUTER_BASE_URL": mock_openrouter_server,
         "OPENROUTER_MODEL": "google/gemini-2.5-flash",
@@ -131,6 +132,7 @@ def test_cli_image_input(test_image_png, tmp_path, mock_openrouter_server):
     out = tmp_path / "image-result.json"
     env = {
         **os.environ,
+        "PROVIDER": "openrouter",
         "OPENROUTER_API_KEY": "sk-test-key",
         "OPENROUTER_BASE_URL": mock_openrouter_server,
         "OPENROUTER_MODEL": "google/gemini-2.5-flash",
@@ -150,6 +152,7 @@ def test_cli_pdf_input(test_pdf, tmp_path, mock_openrouter_server):
     out = tmp_path / "pdf-result.json"
     env = {
         **os.environ,
+        "PROVIDER": "openrouter",
         "OPENROUTER_API_KEY": "sk-test-key",
         "OPENROUTER_BASE_URL": mock_openrouter_server,
         "OPENROUTER_MODEL": "google/gemini-2.5-flash",
@@ -169,6 +172,7 @@ def test_cli_start_end_flags(test_video, tmp_path, mock_openrouter_server):
     out = tmp_path / "range-result.json"
     env = {
         **os.environ,
+        "PROVIDER": "openrouter",
         "OPENROUTER_API_KEY": "sk-test-key",
         "OPENROUTER_BASE_URL": mock_openrouter_server,
         "OPENROUTER_MODEL": "google/gemini-2.5-flash",

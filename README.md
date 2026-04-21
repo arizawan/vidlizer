@@ -15,7 +15,9 @@
 
 ---
 
-vidlizer extracts frames with ffmpeg, sends them to a vision model via [OpenRouter](https://openrouter.ai), and writes a `flow` array describing every scene, action, and visible text. For videos with audio it automatically transcribes speech with Apple MLX Whisper and merges it into each step.
+vidlizer extracts frames with ffmpeg, sends them to a vision model, and writes a `flow` array describing every scene, action, and visible text. For videos with audio it automatically transcribes speech with Apple MLX Whisper and merges it into each step.
+
+Two provider modes: **local** via [Ollama](https://ollama.com) (no API key, no cost) or **cloud** via [OpenRouter](https://openrouter.ai).
 
 ```bash
 vidlizer demo.mp4
@@ -29,12 +31,13 @@ vidlizer document.pdf
 ## ✨ Features
 
 - **Any input** — local video, image (jpg/png/webp/…), PDF, or URL (YouTube, Loom, Vimeo, Twitter)
+- **Local inference** — run fully offline via Ollama (`--provider ollama`), no API key needed
+- **Cloud inference** — OpenRouter with 7 curated models, live pricing, free model auto-fallback
 - **3 output formats** — `--format json` (default), `summary` (plain text by phase), `markdown` (step-per-section doc)
 - **Auto transcript** — detects audio, transcribes with Apple MLX Whisper (Neural Engine), merges speech into each flow step
 - **Perceptual dedup** — removes near-duplicate frames before sending (saves tokens)
 - **analyze_moment** — `--start`/`--end` flags to focus on a time range
 - **In-memory cache** — repeat runs on the same file skip the API call
-- **Multi-model** — 7 curated models with live pricing; free models auto-fallback to cheapest paid
 - **Cost guard** — aborts if spend exceeds `MAX_COST_USD` (default $1.00)
 - **Live progress** — Rich streaming indicator shows elapsed time and token count per batch
 - **Auto-install** — missing `ffmpeg` is brew-installed; `mlx-whisper` is pip-installed on first audio video
@@ -46,7 +49,8 @@ vidlizer document.pdf
 
 - macOS (Apple Silicon recommended for transcription speed)
 - Python 3.10+
-- An [OpenRouter API key](https://openrouter.ai/keys)
+- **Local mode**: [Ollama](https://ollama.com) installed + a vision model pulled (8 GB+ RAM)
+- **Cloud mode**: An [OpenRouter API key](https://openrouter.ai/keys)
 
 `ffmpeg` is installed automatically via Homebrew on first run if missing.
 
@@ -59,7 +63,21 @@ git clone https://github.com/arizawan/vidlizer.git
 cd vidlizer
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
-cp env.sample .env        # paste your OpenRouter key
+cp env.sample .env        # configure provider + keys
+```
+
+**Local mode** (no API key needed):
+
+```bash
+# Install Ollama from https://ollama.com, then:
+ollama pull qwen2.5vl:3b   # ~3.2 GB, requires 8 GB+ RAM
+```
+
+**Cloud mode**:
+
+```bash
+# Paste your OpenRouter key in .env:
+# OPENROUTER_API_KEY=sk-or-v1-...
 ```
 
 ---
@@ -67,30 +85,28 @@ cp env.sample .env        # paste your OpenRouter key
 ## ⚡ Quick start
 
 ```bash
-# Analyze a local video
-vidlizer demo.mp4
+# Local inference (Ollama, free, no API key)
+vidlizer demo.mp4 --provider ollama --model qwen2.5vl:3b
+
+# Cloud inference (OpenRouter)
+vidlizer demo.mp4 --provider openrouter --model google/gemini-2.5-flash
 
 # Analyze a YouTube video
 vidlizer "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
-# Analyze a single image
+# Analyze a single image or PDF
 vidlizer screenshot.png
-
-# Analyze a PDF
 vidlizer report.pdf
 
-# Focus on a time range (analyze_moment)
+# Focus on a time range
 vidlizer demo.mp4 --start 30 --end 90
-
-# Pick model + output path explicitly
-vidlizer demo.mp4 --model google/gemini-2.5-flash -o result.json
 
 # Output as Markdown or plain-text summary
 vidlizer demo.mp4 --format markdown -o result.md
 vidlizer demo.mp4 --format summary -o result.txt
 ```
 
-Run with no arguments to get an interactive file picker and model selector.
+Run with no arguments for an interactive file picker + provider/model selector.
 
 ---
 
@@ -149,7 +165,21 @@ Default output path is `<normalized-name>.analysis.json` (or matching extension)
 
 ## 🤖 Models
 
-Models are fetched live from OpenRouter with current pricing. Seven curated defaults:
+### Local (Ollama) — no API key, no cost
+
+Requires 8 GB+ RAM. Install a model with `ollama pull <name>`:
+
+| Model | Disk | RAM | Notes |
+|---|---|---|---|
+| `qwen2.5vl:3b` | 3.2 GB | ~5 GB | **Recommended** — 125K ctx, strong JSON, multi-image |
+| `qwen2.5vl:7b` | 6.0 GB | ~9 GB | Best local quality, needs 10+ GB RAM |
+| `minicpm-v:8b` | 5.5 GB | ~8 GB | Strong OCR + visual reasoning, 32K ctx |
+
+Uses Ollama's native `/api/chat` endpoint with `format: json` for reliable structured output. One frame per request (per-frame batching is automatic).
+
+### Cloud (OpenRouter)
+
+Models fetched live with current pricing:
 
 | Model | Pricing | Notes |
 |---|---|---|
@@ -162,8 +192,6 @@ Models are fetched live from OpenRouter with current pricing. Seven curated defa
 | `google/gemma-4-31b-it:free` | free ⚡ | Rate-limited, may be slow |
 
 Free models auto-fallback to the cheapest paid model on failure.
-
-Override via env var: `OPENROUTER_MODEL=google/gemini-2.5-flash`
 
 ---
 
@@ -192,7 +220,8 @@ positional:
 options:
   -o, --output PATH     Output path (default: <name>.analysis.json/.md/.txt)
   --format FORMAT       Output format: json (default), summary, markdown
-  --model MODEL         OpenRouter model slug
+  --provider PROVIDER   ollama (local, default) or openrouter (cloud)
+  --model MODEL         Model slug — Ollama name or OpenRouter slug
   --max-frames N        Max frames to send (default 60, hard cap 200)
   --start SECONDS       Analyze from this timestamp
   --end SECONDS         Analyze up to this timestamp
@@ -200,7 +229,7 @@ options:
   --min-interval SECS   Minimum seconds between frames (default 2)
   --fps FPS             Extract at fixed FPS instead of scene-change
   --scale PX            Frame width in pixels (default 512)
-  --batch-size N        Frames per API call (0 = auto)
+  --batch-size N        Frames per API call (0 = auto; Ollama forces 1)
   --dedup-threshold N   Perceptual dedup Hamming distance (default 8, 0 = off)
   --no-transcript       Skip audio transcription
   --max-cost USD        Abort if spend exceeds this (default 1.00)
@@ -212,18 +241,27 @@ options:
 
 ## 🔧 Environment variables
 
-Copy `env.sample` to `.env` and fill in your key. All CLI flags can also be set here:
+Copy `env.sample` to `.env`:
 
 ```bash
-OPENROUTER_API_KEY=sk-or-v1-...   # required
+# Provider: ollama (default, local) or openrouter (cloud)
+PROVIDER=ollama
+
+# Ollama (local)
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=qwen2.5vl:3b
+
+# OpenRouter (cloud)
+OPENROUTER_API_KEY=sk-or-v1-...
 OPENROUTER_MODEL=google/gemini-2.5-flash
 
+# Frame extraction
 SCENE_THRESHOLD=0.1     # lower = more frames
 MIN_INTERVAL=2          # seconds between forced frames
 MAX_FRAMES=60
 FRAME_WIDTH=512
 MAX_COST_USD=1.00
-BATCH_SIZE=0
+BATCH_SIZE=0            # Ollama always uses 1 (one frame per request)
 REQUEST_TIMEOUT=600
 ```
 

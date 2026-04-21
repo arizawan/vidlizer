@@ -43,7 +43,7 @@ _MODEL_NOTES = {
 
 
 def _prompt_model() -> str:
-    """Simple curated model picker with live pricing."""
+    """Curated OpenRouter model picker with live pricing."""
     from vidlizer.models import fetch_models, format_price_label
 
     with _console.status("[dim]fetching prices…[/dim]", spinner="dots2"):
@@ -65,6 +65,45 @@ def _prompt_model() -> str:
     return choice
 
 
+def _prompt_provider() -> str:
+    """Ask user to choose between local Ollama and cloud OpenRouter."""
+    choices = [
+        ("ollama",      "Local — Ollama (no API key, no cost, runs on your machine)"),
+        ("openrouter",  "Cloud — OpenRouter (API key required, pay-per-use)"),
+    ]
+    return _prompt_select("Select provider", choices)
+
+
+def _prompt_ollama_model() -> str:
+    """Curated local model picker. Shows install status for each model."""
+    from vidlizer.models import OLLAMA_CURATED_MODELS, fetch_ollama_models
+
+    ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    with _console.status("[dim]checking Ollama…[/dim]", spinner="dots2"):
+        installed = set(fetch_ollama_models(ollama_host))
+
+    choices = []
+    for m in OLLAMA_CURATED_MODELS:
+        mid = m["id"]
+        base = mid.split(":")[0]
+        is_installed = any(i.split(":")[0] == base for i in installed)
+        ram = m.get("ram_gb", "?")
+        disk = m.get("size_gb", "?")
+        if is_installed:
+            status = "[green]✓ installed[/green]"
+        elif m["recommended"]:
+            status = f"~{disk} GB disk / ~{ram} GB RAM — [cyan]ollama pull {mid}[/cyan]  ★ recommended"
+        else:
+            status = f"~{disk} GB disk / ~{ram} GB RAM — [cyan]ollama pull {mid}[/cyan]"
+        choices.append((mid, f"{m['desc']}  [{status}]"))
+    choices.append(("custom", "Enter model name manually"))
+
+    choice = _prompt_select("Select local model", choices)
+    if choice == "custom":
+        choice = _prompt_str("Model name (e.g. qwen2.5vl:3b)")
+    return choice
+
+
 def _print_banner() -> None:
     title = Text()
     title.append("vid", style="bold cyan")
@@ -83,6 +122,9 @@ def _print_config(args: dict) -> None:
     t.add_column(style="dim", min_width=12)
     t.add_column(style="bold white")
     t.add_row("video", str(args["video"]))
+    if args.get("provider") == "ollama":
+        ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        t.add_row("provider", f"[bold green]ollama[/bold green]  [dim]{ollama_host}[/dim]")
     t.add_row("model", f"[magenta]{args['model']}[/magenta]")
     t.add_row("output", f"[cyan]{args['output']}[/cyan]")
     frames_row = f"max {args['max_frames']}  ·  scene>{args['scene']}  ·  interval {args['min_interval']}s"
@@ -232,14 +274,32 @@ def interactive_args(video: Path | None, output_format: str = "json") -> dict:
     else:
         args["output"] = default_output
 
-    # --- Model ---
-    env_model = os.getenv("OPENROUTER_MODEL")
-    if env_model:
-        args["model"] = env_model
+    # --- Provider & model ---
+    env_provider = os.getenv("PROVIDER", "").lower()
+    if env_provider:
+        _provider = env_provider
     elif interactive:
-        args["model"] = _prompt_model()
+        _provider = _prompt_provider()
     else:
-        args["model"] = "google/gemini-2.5-flash"
+        _provider = "ollama"
+    args["provider"] = _provider
+
+    if _provider == "ollama":
+        env_model = os.getenv("OLLAMA_MODEL")
+        if env_model:
+            args["model"] = env_model
+        elif interactive:
+            args["model"] = _prompt_ollama_model()
+        else:
+            args["model"] = "qwen2.5vl:3b"
+    else:
+        env_model = os.getenv("OPENROUTER_MODEL")
+        if env_model:
+            args["model"] = env_model
+        elif interactive:
+            args["model"] = _prompt_model()
+        else:
+            args["model"] = "google/gemini-2.5-flash"
 
     # --- Advanced settings ---
     if interactive:
@@ -314,7 +374,12 @@ def _main() -> int:
     p.add_argument("--format", choices=["json", "summary", "markdown"], default="json",
                    dest="output_format", metavar="FORMAT",
                    help="Output format: json (default), summary (plain text), markdown")
+    p.add_argument("--provider", choices=["openrouter", "ollama"], default=None,
+                   help="AI provider: openrouter (default, cloud) or ollama (local, no API key)")
     cli = p.parse_args()
+
+    if cli.provider:
+        os.environ["PROVIDER"] = cli.provider
 
     _print_banner()
 

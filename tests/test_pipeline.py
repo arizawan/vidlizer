@@ -24,6 +24,7 @@ def _run(video, output, **kwargs):
 
     defaults = dict(
         model="google/gemini-2.5-flash",
+        provider="openrouter",
         scene=0.1, min_interval=1.0, fps=1.0,
         scale=320, max_frames=5, batch_size=0,
         timeout=30, verbose=False, max_cost=10.0,
@@ -92,6 +93,7 @@ def test_second_run_is_cache_hit(test_video, tmp_path):
         from vidlizer.core import run
         params = dict(
             model="google/gemini-2.5-flash",
+            provider="openrouter",
             scene=0.1, min_interval=1.0, fps=1.0,
             scale=320, max_frames=5, batch_size=0,
             timeout=30, verbose=False, max_cost=10.0,

@@ -12,7 +12,36 @@ import requests
 _CACHE_PATH = Path.home() / ".cache" / "vidlizer" / "models.json"
 _CACHE_TTL = 3600  # seconds
 
-# Fallback list if API is unreachable or key is missing
+# Curated local vision models that actually produce structured JSON output reliably.
+# Research notes: moondream (Ollama build broken, empty responses #4063),
+# llava-phi3 (4K ctx, poor JSON adherence), llava:7b (chatty, breaks JSON) — all dropped.
+OLLAMA_CURATED_MODELS: list[dict] = [
+    {
+        "id": "qwen2.5vl:3b",
+        "name": "Qwen2.5-VL 3B",
+        "size_gb": 3.2,
+        "ram_gb": 5,
+        "desc": "Best CPU pick — 125K ctx, strong JSON, multi-image, 8 GB RAM needed",
+        "recommended": True,
+    },
+    {
+        "id": "qwen2.5vl:7b",
+        "name": "Qwen2.5-VL 7B",
+        "size_gb": 6.0,
+        "ram_gb": 9,
+        "desc": "Best local quality — 125K ctx, best JSON accuracy, needs 10+ GB RAM",
+        "recommended": False,
+    },
+    {
+        "id": "minicpm-v:8b",
+        "name": "MiniCPM-V 8B",
+        "size_gb": 5.5,
+        "ram_gb": 8,
+        "desc": "Strong OCR + visual reasoning, 32K ctx, multi-image, needs 10+ GB RAM",
+        "recommended": False,
+    },
+]
+
 _FALLBACK: list[dict] = [
     {"id": "google/gemini-2.5-flash",             "name": "Gemini 2.5 Flash",          "input_usd_per_1m": 0.15,  "output_usd_per_1m": 0.60,  "free": False, "rate_limited": False, "per_req_limit_tokens": None, "context_length": 1048576},
     {"id": "google/gemini-2.5-flash-lite",        "name": "Gemini 2.5 Flash Lite",     "input_usd_per_1m": 0.075, "output_usd_per_1m": 0.30,  "free": False, "rate_limited": False, "per_req_limit_tokens": None, "context_length": 1048576},
@@ -52,6 +81,16 @@ def _parse_price(raw: str | float | None) -> float:
         return per_token * 1_000_000  # convert to per-million
     except (TypeError, ValueError):
         return 0.0
+
+
+def fetch_ollama_models(host: str = "http://localhost:11434") -> list[str]:
+    """Return names of installed Ollama models. Empty list if Ollama unreachable."""
+    try:
+        r = requests.get(f"{host}/api/tags", timeout=5)
+        r.raise_for_status()
+        return [m["name"] for m in r.json().get("models", [])]
+    except Exception:
+        return []
 
 
 def fetch_models(api_key: str | None = None, force_refresh: bool = False) -> list[dict]:
