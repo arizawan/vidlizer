@@ -35,6 +35,7 @@ dependencies = [
 
 [project.optional-dependencies]
 transcribe = ["mlx-whisper>=0.4"]
+mcp = ["mcp>=1.0"]
 dev = [
     "pytest>=8.0",
     "pytest-html>=4.0",
@@ -48,6 +49,7 @@ Repository = "https://github.com/arizawan/vidlizer"
 
 [project.scripts]
 vidlizer = "vidlizer.cli:main"
+vidlizer-mcp = "vidlizer.mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

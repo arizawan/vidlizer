@@ -267,6 +267,92 @@ REQUEST_TIMEOUT=600
 
 ---
 
+## 🔌 MCP Server
+
+Use vidlizer from any MCP-compatible agent — Claude Code, Cursor, Gemini CLI, PI Code, Claude Desktop.
+
+### Install
+
+```bash
+pip install -e ".[mcp]"   # adds mcp package + vidlizer-mcp entry point
+```
+
+### Configure
+
+Add to your MCP config (`~/.claude/mcp.json`, `.cursor/mcp.json`, etc.):
+
+```json
+{
+  "mcpServers": {
+    "vidlizer": {
+      "command": "/path/to/.venv/bin/vidlizer-mcp",
+      "env": {
+        "PROVIDER": "ollama",
+        "OLLAMA_MODEL": "qwen2.5vl:3b"
+      }
+    }
+  }
+}
+```
+
+For cloud (OpenRouter):
+```json
+{
+  "mcpServers": {
+    "vidlizer": {
+      "command": "/path/to/.venv/bin/vidlizer-mcp",
+      "env": {
+        "PROVIDER": "openrouter",
+        "OPENROUTER_API_KEY": "sk-or-v1-..."
+      }
+    }
+  }
+}
+```
+
+### Tools
+
+| Tool | Returns | Tokens out |
+|---|---|---|
+| `analyze_video(path, **opts)` | `analysis_id` + meta | ~100 |
+| `list_analyses()` | all stored analyses (meta only) | ~50/entry |
+| `get_summary(id, level)` | brief/medium/full text summary | ~200–2K |
+| `get_step(id, step)` | single flow step | ~150 |
+| `get_steps(id, start, end)` | step range | scaled |
+| `get_phase(id, phase)` | all steps in named phase | scaled |
+| `search_analysis(id, query)` | steps matching text | only hits |
+| `get_transcript(id, start_s, end_s)` | transcript slice | scaled |
+| `get_full_analysis(id)` | full flow + transcript | full |
+| `delete_analysis(id)` | confirmation | ~10 |
+
+### Token-efficient workflow
+
+`analyze_video` stores the full result on disk and returns only `analysis_id` + metadata (~100 tokens). The LLM pulls specific parts on demand — a 60-step video costs ~100 tokens to register but only loads what's needed per query.
+
+```
+agent: analyze_video("demo.mp4")
+→ { "analysis_id": "abc123", "step_count": 42, "phases": ["Intro", "Demo", "Outro"] }
+
+agent: get_summary("abc123", level="brief")
+→ "Intro: Title card displayed | Demo: CLI recording | Outro: Results shown"
+
+agent: get_phase("abc123", "Demo")
+→ [ { step, timestamp_s, action, scene }, … ]
+
+agent: search_analysis("abc123", "error")
+→ [ { step: 17, matched_field: "observations", matched_value: "Stack trace visible" } ]
+```
+
+### MCP resources
+
+| URI | Content |
+|---|---|
+| `vidlizer://analyses` | All analyses (meta JSON) |
+| `vidlizer://analyses/{id}` | Full analysis JSON |
+| `vidlizer://analyses/{id}/summary` | Medium text summary |
+
+---
+
 ## 🧪 Testing
 
 Fully automated test suite — **103 unit + integration tests, 3 e2e tests**.
