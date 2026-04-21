@@ -279,13 +279,40 @@ pip install -e ".[mcp]"   # adds mcp package + vidlizer-mcp entry point
 
 ### Configure
 
-Add to your MCP config (`~/.claude/mcp.json`, `.cursor/mcp.json`, etc.):
+Use the **absolute path** to the venv binary — no shell activation needed.
 
+**Claude Code** (adds to `~/.claude.json`):
+```bash
+claude mcp add vidlizer /path/to/.venv/bin/vidlizer-mcp \
+  -e PROVIDER=openrouter \
+  -e OPENROUTER_API_KEY=sk-or-v1-... \
+  -e OPENROUTER_MODEL=google/gemini-2.5-flash
+```
+
+**Other clients** (Cursor `.cursor/mcp.json`, Claude Desktop, Bolt, etc.):
 ```json
 {
   "mcpServers": {
     "vidlizer": {
-      "command": "/path/to/.venv/bin/vidlizer-mcp",
+      "type": "stdio",
+      "command": "/absolute/path/to/.venv/bin/vidlizer-mcp",
+      "env": {
+        "PROVIDER": "openrouter",
+        "OPENROUTER_API_KEY": "sk-or-v1-...",
+        "OPENROUTER_MODEL": "google/gemini-2.5-flash"
+      }
+    }
+  }
+}
+```
+
+Local (Ollama, no API key):
+```json
+{
+  "mcpServers": {
+    "vidlizer": {
+      "type": "stdio",
+      "command": "/absolute/path/to/.venv/bin/vidlizer-mcp",
       "env": {
         "PROVIDER": "ollama",
         "OLLAMA_MODEL": "qwen2.5vl:3b"
@@ -295,19 +322,11 @@ Add to your MCP config (`~/.claude/mcp.json`, `.cursor/mcp.json`, etc.):
 }
 ```
 
-For cloud (OpenRouter):
-```json
-{
-  "mcpServers": {
-    "vidlizer": {
-      "command": "/path/to/.venv/bin/vidlizer-mcp",
-      "env": {
-        "PROVIDER": "openrouter",
-        "OPENROUTER_API_KEY": "sk-or-v1-..."
-      }
-    }
-  }
-}
+### Logs
+
+All activity (frame extraction, API calls, errors) written to:
+```bash
+tail -f ~/.cache/vidlizer/mcp.log
 ```
 
 ### Tools
