@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-82%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-103%20passing-brightgreen.svg)](#testing)
 
 ![demo](assets/demo.gif)
 
@@ -29,13 +29,14 @@ vidlizer document.pdf
 ## ✨ Features
 
 - **Any input** — local video, image (jpg/png/webp/…), PDF, or URL (YouTube, Loom, Vimeo, Twitter)
-- **Structured output** — `flow` array with scene, action, subjects, text, observations, timestamps
+- **3 output formats** — `--format json` (default), `summary` (plain text by phase), `markdown` (step-per-section doc)
 - **Auto transcript** — detects audio, transcribes with Apple MLX Whisper (Neural Engine), merges speech into each flow step
 - **Perceptual dedup** — removes near-duplicate frames before sending (saves tokens)
 - **analyze_moment** — `--start`/`--end` flags to focus on a time range
 - **In-memory cache** — repeat runs on the same file skip the API call
 - **Multi-model** — 7 curated models with live pricing; free models auto-fallback to cheapest paid
 - **Cost guard** — aborts if spend exceeds `MAX_COST_USD` (default $1.00)
+- **Live progress** — Rich streaming indicator shows elapsed time and token count per batch
 - **Auto-install** — missing `ffmpeg` is brew-installed; `mlx-whisper` is pip-installed on first audio video
 - **Mac-native** — file picker dialog, Apple MLX transcription, osascript integration
 
@@ -83,6 +84,10 @@ vidlizer demo.mp4 --start 30 --end 90
 
 # Pick model + output path explicitly
 vidlizer demo.mp4 --model google/gemini-2.5-flash -o result.json
+
+# Output as Markdown or plain-text summary
+vidlizer demo.mp4 --format markdown -o result.md
+vidlizer demo.mp4 --format summary -o result.txt
 ```
 
 Run with no arguments to get an interactive file picker and model selector.
@@ -91,7 +96,15 @@ Run with no arguments to get an interactive file picker and model selector.
 
 ## 📄 Output
 
-Output goes to `<normalized-name>.analysis.json` by default, or pass `-o path.json`.
+Three formats via `--format`:
+
+| Format | Flag | Default extension | Description |
+|---|---|---|---|
+| JSON | `--format json` | `.analysis.json` | Full structured flow array (default) |
+| Markdown | `--format markdown` | `.analysis.md` | Step-per-section document with scene/action/speech |
+| Summary | `--format summary` | `.analysis.txt` | Plain text grouped by phase |
+
+Default output path is `<normalized-name>.analysis.json` (or matching extension), or pass `-o path`.
 
 ```json
 {
@@ -177,7 +190,8 @@ positional:
   video                 Path to file or URL (YouTube/Loom/Vimeo/Twitter)
 
 options:
-  -o, --output PATH     Output JSON path (default: <name>.analysis.json)
+  -o, --output PATH     Output path (default: <name>.analysis.json/.md/.txt)
+  --format FORMAT       Output format: json (default), summary, markdown
   --model MODEL         OpenRouter model slug
   --max-frames N        Max frames to send (default 60, hard cap 200)
   --start SECONDS       Analyze from this timestamp
@@ -217,7 +231,7 @@ REQUEST_TIMEOUT=600
 
 ## 🧪 Testing
 
-Fully automated test suite — **82 unit + integration tests, 3 e2e tests**.
+Fully automated test suite — **103 unit + integration tests, 3 e2e tests**.
 
 ```bash
 make install-dev    # installs pytest, pytest-html, pytest-mock
@@ -230,6 +244,7 @@ Reports land in `reports/test-report.html`. Tests cover:
 - Frame extraction (ffmpeg), perceptual dedup, cache TTL
 - Audio detection, transcript merge (no duplicates)
 - PDF → frames, image encoding, URL detection
+- Output formatter: json/summary/markdown correctness
 - Full pipeline with mocked OpenRouter (fake HTTP server)
 - Real CLI subprocess invocations against real media
 - Real YouTube download + full analysis (opt-in `-m e2e`)
