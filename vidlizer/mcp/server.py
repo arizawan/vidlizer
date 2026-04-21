@@ -1,15 +1,35 @@
 """MCP server for vidlizer — analyze any video/image/PDF via any MCP-compatible agent."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
+import logging
 import os
+import sys
 import tempfile
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from vidlizer.mcp import store
+
+_LOG_PATH = Path.home() / ".cache" / "vidlizer" / "mcp.log"
+
+_logger = logging.getLogger("vidlizer.mcp")
+
+
+def _setup_logging() -> None:
+    _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fh = logging.FileHandler(_LOG_PATH, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    root.addHandler(fh)
+    # Redirect stderr (Rich console from core.py) to same log file
+    sys.stderr = open(_LOG_PATH, "a", encoding="utf-8", buffering=1)  # noqa: SIM115
+
 
 app = FastMCP(
     "vidlizer",
@@ -17,13 +37,14 @@ app = FastMCP(
         "Analyze videos, images, and PDFs into structured JSON timelines. "
         "Supports local files and URLs (YouTube, Vimeo, Loom, Twitter/X). "
         "Workflow: call analyze_video → get analysis_id → use get_summary/get_step/"
-        "get_phase/search_analysis to retrieve specific parts without loading everything. "
-        "Full data via get_full_analysis (use sparingly — can be large)."
+        "get_phase/search_analysis to pull specific parts without loading everything. "
+        "Full data via get_full_analysis (use sparingly — can be large). "
+        "Tail logs: tail -f ~/.cache/vidlizer/mcp.log"
     ),
 )
 
 
-# ─── internal helpers ────────────────────────────────────────────────────────
+# ─── helpers ────────────────────────────────────────────────────────────────
 
 def _resolve_model(provider: str, model: str) -> str:
     if model:
@@ -68,7 +89,8 @@ def _summary_text(data: dict, level: str = "medium") -> str:
 
     if level == "full":
         return "\n".join(
-            f"[{s.get('timestamp_s', '?')}s] step {s['step']}: {s.get('action', '')} — {s.get('scene', '')}"
+            f"[{s.get('timestamp_s', '?')}s] step {s['step']}: "
+            f"{s.get('action', '')} — {s.get('scene', '')}"
             for s in flow
         )
 
@@ -105,7 +127,8 @@ def _summary_text(data: dict, level: str = "medium") -> str:
 # ─── tools ──────────────────────────────────────────────────────────────────
 
 @app.tool()
-def analyze_video(
+async def analyze_video(
+    ctx: Context,
     path: str,
     provider: str = "",
     model: str = "",
@@ -124,20 +147,20 @@ def analyze_video(
     force_rerun: bool = False,
 ) -> dict:
     """
-    Analyze a video, image, or PDF. Returns analysis_id + lightweight metadata only.
+    Analyze a video, image, or PDF. Returns analysis_id + metadata.
 
     Supported inputs:
     - Local files: /absolute/path/to/video.mp4, image.png, document.pdf
     - URLs: YouTube, Vimeo, Loom, Twitter/X
 
-    After analysis, use get_summary/get_step/get_phase to pull specific parts
-    instead of loading the full dataset (saves tokens).
+    After analysis, use get_summary/get_step/get_phase to retrieve parts
+    on demand instead of loading everything at once (saves tokens).
 
     Args:
         path: Local file path or URL
-        provider: 'ollama' (local, free) or 'openrouter' (cloud, needs API key).
-                  Defaults to PROVIDER env var or 'ollama'.
-        model: Model ID — Ollama name or OpenRouter slug.
+        provider: 'ollama' (local, free) or 'openrouter' (cloud, API key needed).
+                  Defaults to PROVIDER env var.
+        model: Model ID — Ollama name or OpenRouter slug (e.g. google/gemini-2.5-flash).
                Defaults to OLLAMA_MODEL / OPENROUTER_MODEL env vars.
         max_frames: Max frames to extract (default 60, hard cap 200)
         start: Analyze from this timestamp in seconds
@@ -151,72 +174,69 @@ def analyze_video(
         transcript: Auto-transcribe audio via Apple MLX Whisper (default True)
         max_cost_usd: Abort if spend exceeds this in USD (default 1.00)
         timeout: Per-request timeout in seconds (default 600)
-        force_rerun: Re-analyze even if a cached result exists (default False)
+        force_rerun: Re-analyze even if cached result exists (default False)
     """
     _provider = (provider or os.getenv("PROVIDER", "")).lower()
     _model = _resolve_model(_provider, model)
+    progress_log: list[str] = []
+
+    def _log(msg: str) -> None:
+        progress_log.append(msg)
+        _logger.info(msg)
 
     params = {
-        "provider": _provider,
-        "model": _model,
-        "max_frames": max_frames,
-        "start": start,
-        "end": end,
-        "scene_threshold": scene_threshold,
-        "min_interval": min_interval,
-        "fps": fps,
-        "scale": scale,
-        "batch_size": batch_size,
-        "dedup_threshold": dedup_threshold,
+        "provider": _provider, "model": _model, "max_frames": max_frames,
+        "start": start, "end": end, "scene_threshold": scene_threshold,
+        "min_interval": min_interval, "fps": fps, "scale": scale,
+        "batch_size": batch_size, "dedup_threshold": dedup_threshold,
         "transcript": transcript,
     }
     aid = store.make_id(path, params)
 
     if not force_rerun and store.exists(aid):
+        _log(f"Cache hit: {aid}")
         rec = store.load(aid)
-        return {**_meta(rec), "cached": True}
+        return {**_meta(rec), "cached": True, "progress_log": progress_log}
 
-    # Handle URL download
+    _log(f"Starting analysis: {path}")
+    _log(f"Provider: {_provider or 'from env'} | Model: {_model}")
+    await ctx.report_progress(0, 100)
+
+    # URL download
     url_ctx: contextlib.AbstractContextManager = contextlib.nullcontext(None)
     local_path = path
 
     from vidlizer.downloader import is_url
     if is_url(path):
         from vidlizer.downloader import download
+        _log("Downloading video from URL…")
+        await ctx.report_progress(10, 100)
         url_tmp = tempfile.TemporaryDirectory(prefix="vidlizer_dl_")
         url_ctx = url_tmp
-        local_path = str(download(path, Path(url_tmp.name)))
+        try:
+            local_path = str(await asyncio.to_thread(download, path, Path(url_tmp.name)))
+            _log(f"Downloaded: {Path(local_path).name}")
+        except Exception as e:
+            _log(f"Download failed: {e}")
+            return {"error": f"Download failed: {e}", "analysis_id": None, "progress_log": progress_log}
 
-    from vidlizer.core import run
+    _log(f"Extracting frames (max {max_frames}) and sending to {_model}…")
+    await ctx.report_progress(20, 100)
 
-    with url_ctx:
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
-            tmp_out = Path(f.name)
-
+    def _run_analysis() -> tuple[int, dict]:
+        from vidlizer.core import run
         if _provider:
             os.environ["PROVIDER"] = _provider
-
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
+            tmp_out = Path(f.name)
         rc = run(
-            video=Path(local_path),
-            output=tmp_out,
-            model=_model,
-            provider=_provider,
-            scene=scene_threshold,
-            min_interval=min_interval,
-            fps=fps,
-            scale=scale,
-            max_frames=max_frames,
-            batch_size=batch_size,
-            timeout=timeout,
-            verbose=False,
-            max_cost=max_cost_usd,
-            start=start,
-            end=end,
-            dedup_threshold=dedup_threshold,
-            no_transcript=not transcript,
+            video=Path(local_path), output=tmp_out, model=_model, provider=_provider,
+            scene=scene_threshold, min_interval=min_interval, fps=fps, scale=scale,
+            max_frames=max_frames, batch_size=batch_size, timeout=timeout,
+            verbose=False, max_cost=max_cost_usd, start=start, end=end,
+            dedup_threshold=dedup_threshold, no_transcript=not transcript,
             output_format="json",
         )
-
         data: dict = {}
         if tmp_out.exists():
             try:
@@ -224,13 +244,35 @@ def analyze_video(
             except Exception:
                 pass
             tmp_out.unlink(missing_ok=True)
+        return rc, data
+
+    with url_ctx:
+        await ctx.report_progress(25, 100)
+        rc, data = await asyncio.to_thread(_run_analysis)
+
+    await ctx.report_progress(90, 100)
 
     if rc != 0 or not data:
-        return {"error": f"Analysis failed (exit code {rc})", "analysis_id": None}
+        _log(f"Analysis failed (exit code {rc})")
+        return {"error": f"Analysis failed (exit code {rc})", "analysis_id": None, "progress_log": progress_log}
+
+    steps = len(data.get("flow", []))
+    _log(f"Analysis complete: {steps} steps extracted")
+    if data.get("transcript"):
+        _log(f"Transcript: {len(data['transcript'])} segments")
 
     store.save(aid, path, params, data)
+    _log(f"Saved as analysis_id={aid}")
+    await ctx.report_progress(100, 100)
+
     rec = store.load(aid)
-    return {**_meta(rec), "cached": False}
+    result = {**_meta(rec), "cached": False, "progress_log": progress_log}
+    result["next_steps"] = (
+        f"Call get_summary('{aid}') for an overview, "
+        f"get_phase('{aid}', '<phase>') for a section, "
+        f"or search_analysis('{aid}', '<keyword>') to find specific moments."
+    )
+    return result
 
 
 @app.tool()
@@ -246,8 +288,7 @@ def get_summary(analysis_id: str, level: str = "medium") -> str:
 
     Args:
         analysis_id: ID returned by analyze_video or list_analyses
-        level: Verbosity — 'brief' (1 paragraph), 'medium' (phase groups, default),
-               'full' (one-liner per step)
+        level: 'brief' (1 paragraph), 'medium' (phase groups, default), 'full' (one-liner per step)
     """
     rec = store.load(analysis_id)
     if not rec:
@@ -263,8 +304,7 @@ def get_step(analysis_id: str, step: int, full: bool = False) -> dict:
     Args:
         analysis_id: ID from analyze_video
         step: Step number (1-indexed)
-        full: Return all 11 fields. Default: core fields only (step, timestamp_s,
-              phase, action, scene, speech).
+        full: Return all 11 fields. Default: core fields only (step, timestamp_s, phase, action, scene, speech).
     """
     rec = store.load(analysis_id)
     if not rec:
@@ -288,8 +328,8 @@ def get_steps(
 
     Args:
         analysis_id: ID from analyze_video
-        start_step: First step number (inclusive, 1-indexed, default 1)
-        end_step: Last step number (inclusive). Defaults to last step.
+        start_step: First step (inclusive, 1-indexed, default 1)
+        end_step: Last step (inclusive). Defaults to last step.
         full: Return all fields (default: core fields only)
     """
     rec = store.load(analysis_id)
@@ -297,11 +337,7 @@ def get_steps(
         return [{"error": f"Analysis {analysis_id!r} not found"}]
     flow = rec["data"].get("flow", [])
     last = end_step or len(flow)
-    return [
-        _slim(s, full)
-        for s in flow
-        if start_step <= s.get("step", 0) <= last
-    ]
+    return [_slim(s, full) for s in flow if start_step <= s.get("step", 0) <= last]
 
 
 @app.tool()
@@ -318,11 +354,7 @@ def get_phase(analysis_id: str, phase: str, full: bool = False) -> list[dict]:
     if not rec:
         return [{"error": f"Analysis {analysis_id!r} not found"}]
     flow = rec["data"].get("flow", [])
-    return [
-        _slim(s, full)
-        for s in flow
-        if s.get("phase", "").lower() == phase.lower()
-    ]
+    return [_slim(s, full) for s in flow if s.get("phase", "").lower() == phase.lower()]
 
 
 @app.tool()
@@ -448,6 +480,8 @@ def resource_summary(analysis_id: str) -> str:
 def main() -> None:
     from dotenv import load_dotenv
     load_dotenv()
+    _setup_logging()
+    _logger.info("vidlizer-mcp server starting")
     app.run()
 
 
