@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from rich.console import Console
@@ -147,8 +148,15 @@ def call_model(
     is_ollama: bool = False,
     no_stream_opts: bool = False,
     no_json_format: bool = False,
+    concurrency: int = 1,
 ) -> dict:
-    """Send frames to model. Auto-retries with batching on image-limit errors."""
+    """Send frames to model. Auto-retries with batching on image-limit errors.
+
+    concurrency > 1 dispatches chunks in parallel (OpenRouter only — local providers
+    serialize anyway). Parallel mode uses PROMPT for every chunk (no phase context
+    chain); slight cost-cap overshoot is accepted since in-flight requests complete
+    before the cap is rechecked.
+    """
     if _depth > _MAX_RECURSION_DEPTH:
         raise RuntimeError(
             f"batching recursion depth {_depth} exceeded — "
@@ -165,21 +173,28 @@ def call_model(
             parts.append(encode_frame(f))
         return parts
 
-    if batch_size <= 0 or len(frames) <= batch_size:
-        content = _build_content(PROMPT_IMAGE if is_image else PROMPT, frames, timestamps)
-        tracker.batches_total = 1
-        _payload: dict = {
+    def _make_payload(prompt: str, chunk: list[Path], ts: list[float] | None) -> dict:
+        p: dict = {
             "model": model,
-            "messages": [{"role": "user", "content": content}],
+            "messages": [{"role": "user", "content": _build_content(prompt, chunk, ts)}],
             "temperature": 0.1,
         }
         if not is_ollama and not no_json_format:
-            _payload["response_format"] = {"type": "json_object"}
+            p["response_format"] = {"type": "json_object"}
+        return p
+
+    def _post_chunk(label: str, payload: dict, chunk: list[Path]) -> dict:
+        return post(api_key, model, payload, timeout, verbose, tracker,
+                    label=label, n_frames=len(chunk),
+                    endpoint=endpoint, req_headers=req_headers,
+                    is_ollama=is_ollama, no_stream_opts=no_stream_opts)
+
+    # ── Single request (no batching needed) ──────────────────────────────────
+    if batch_size <= 0 or len(frames) <= batch_size:
+        tracker.batches_total = 1
+        payload = _make_payload(PROMPT_IMAGE if is_image else PROMPT, frames, timestamps)
         try:
-            body = post(api_key, model, _payload, timeout, verbose, tracker,
-                        label="[1/1]", n_frames=len(frames),
-                        endpoint=endpoint, req_headers=req_headers, is_ollama=is_ollama,
-                        no_stream_opts=no_stream_opts)
+            body = _post_chunk("[1/1]", payload, frames)
             result = parse_json(body["choices"][0]["message"]["content"])
             _console.print(
                 f"  [green]✓[/green] [bold][1/1][/bold]  "
@@ -191,46 +206,102 @@ def call_model(
             _console.print(f"[yellow]⚠[/yellow]  image limit hit — auto-batching at [bold]{auto_batch}[/bold] frames/request")
             return call_model(api_key, model, frames, timeout, verbose, auto_batch, tracker, _depth + 1,
                               timestamps=timestamps, endpoint=endpoint, req_headers=req_headers,
-                              is_ollama=is_ollama, no_stream_opts=no_stream_opts, no_json_format=no_json_format)
+                              is_ollama=is_ollama, no_stream_opts=no_stream_opts,
+                              no_json_format=no_json_format, concurrency=concurrency)
 
-    all_steps: list[dict] = []
-    step_offset = 1
-    phase_context = "Initial Run"
+    # ── Build chunk list ──────────────────────────────────────────────────────
     total_chunks = (len(frames) + batch_size - 1) // batch_size
     tracker.batches_total = total_chunks
 
+    chunk_specs = []
     for i, chunk_start in enumerate(range(0, len(frames), batch_size)):
         chunk = frames[chunk_start:chunk_start + batch_size]
-        is_first = i == 0
+        chunk_ts = timestamps[chunk_start:chunk_start + batch_size] if timestamps else None
         label = f"[{i+1}/{total_chunks}]"
+        chunk_specs.append((i, chunk_start, chunk, chunk_ts, label))
+
+    # ── Parallel path ─────────────────────────────────────────────────────────
+    if concurrency > 1 and total_chunks > 1:
+        _console.print(f"[dim]parallel: {total_chunks} chunks × {concurrency} workers[/dim]")
+
+        def _run_chunk(spec: tuple) -> tuple[int, int, list[Path], list[float] | None, str, dict]:
+            i, chunk_start, chunk, chunk_ts, label = spec
+            payload = _make_payload(PROMPT, chunk, chunk_ts)
+            body = _post_chunk(label, payload, chunk)
+            return i, chunk_start, chunk, chunk_ts, label, body
+
+        raw_results: dict[int, tuple] = {}
+        had_image_limit = False
+
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = {executor.submit(_run_chunk, spec): spec for spec in chunk_specs}
+            for future in as_completed(futures):
+                try:
+                    i, chunk_start, chunk, chunk_ts, label, body = future.result()
+                    raw_results[i] = (chunk_start, chunk, chunk_ts, label, body)
+                except ImageLimitError:
+                    had_image_limit = True
+                    # Cancel remaining (best-effort) and fall through to serial retry
+                    for f in futures:
+                        f.cancel()
+                    break
+
+        if had_image_limit:
+            smaller = max(1, batch_size // 2)
+            _console.print(f"[yellow]⚠[/yellow]  image limit — retrying serial batch_size={smaller}")
+            return call_model(api_key, model, frames, timeout, verbose, smaller, tracker, _depth + 1,
+                              timestamps=timestamps, endpoint=endpoint, req_headers=req_headers,
+                              is_ollama=is_ollama, no_stream_opts=no_stream_opts,
+                              no_json_format=no_json_format, concurrency=1)
+
+        all_steps: list[dict] = []
+        step_offset = 1
+        for i in sorted(raw_results):
+            chunk_start, chunk, chunk_ts, label, body = raw_results[i]
+            if verbose:
+                raw_text = body["choices"][0]["message"]["content"] or ""
+                _console.print(f"[dim][batch] raw chunk {i+1}:\n{raw_text[:300]}[/dim]", markup=False)
+            raw_text = body["choices"][0]["message"]["content"] or ""
+            try:
+                chunk_data = parse_json(raw_text)
+            except json.JSONDecodeError as e:
+                _console.print(f"[yellow]⚠[/yellow]  chunk {i+1} parse failed ({e}) — skipping")
+                continue
+            steps = chunk_data.get("flow", [])
+            for j, step in enumerate(steps):
+                step["step"] = step_offset + j
+            all_steps.extend(steps)
+            step_offset += len(steps)
+            _console.print(
+                f"  [green]✓[/green] [bold]{label}[/bold]  "
+                f"frames [white]{chunk_start+1}–{chunk_start+len(chunk)}[/white]  "
+                f"[dim]|[/dim]  [white]{len(steps)} steps[/white]"
+            )
+        return {"flow": all_steps}
+
+    # ── Serial path ───────────────────────────────────────────────────────────
+    all_steps = []
+    step_offset = 1
+    phase_context = "Initial Run"
+
+    for i, chunk_start, chunk, chunk_ts, label in chunk_specs:
+        is_first = i == 0
         if verbose:
             _console.print(f"[dim][batch] chunk {i+1}: frames {chunk_start+1}–{chunk_start+len(chunk)} (step offset {step_offset})[/dim]", markup=False)
 
-        chunk_ts = timestamps[chunk_start:chunk_start + batch_size] if timestamps else None
         prompt_text = PROMPT if is_first else PROMPT_CONTINUE.format(
-            step_offset=step_offset,
-            phase_context=phase_context,
+            step_offset=step_offset, phase_context=phase_context,
         )
-        content = _build_content(prompt_text, chunk, chunk_ts)
-
-        _chunk_payload: dict = {
-            "model": model,
-            "messages": [{"role": "user", "content": content}],
-            "temperature": 0.1,
-        }
-        if not is_ollama and not no_json_format:
-            _chunk_payload["response_format"] = {"type": "json_object"}
+        payload = _make_payload(prompt_text, chunk, chunk_ts)
         try:
-            body = post(api_key, model, _chunk_payload, timeout, verbose, tracker,
-                        label=label, n_frames=len(chunk),
-                        endpoint=endpoint, req_headers=req_headers, is_ollama=is_ollama,
-                        no_stream_opts=no_stream_opts)
+            body = _post_chunk(label, payload, chunk)
         except ImageLimitError:
             smaller = max(1, len(chunk) // 2)
             _console.print(f"[yellow]⚠[/yellow]  chunk {i+1} hit image limit — re-splitting to batch_size={smaller}")
             sub = call_model(api_key, model, chunk, timeout, verbose, smaller, tracker, _depth + 1,
                              timestamps=chunk_ts, endpoint=endpoint, req_headers=req_headers,
-                             is_ollama=is_ollama, no_stream_opts=no_stream_opts, no_json_format=no_json_format)
+                             is_ollama=is_ollama, no_stream_opts=no_stream_opts,
+                             no_json_format=no_json_format, concurrency=1)
             for j, step in enumerate(sub.get("flow", [])):
                 step["step"] = step_offset + j
             all_steps.extend(sub.get("flow", []))

@@ -136,6 +136,7 @@ def run(
     no_transcript: bool = False,
     output_format: str = "json",
     provider: str = "",
+    concurrency: int = 0,
 ) -> int:
     v = verbose
     _provider = (provider or os.getenv("PROVIDER", "ollama")).lower()
@@ -155,6 +156,17 @@ def run(
     if batch_size == 0:
         batch_size = 1
         _info("auto-set [bold]batch_size=1[/bold] (override with --batch-size)")
+
+    # Provider-aware concurrency: local providers serialize server-side anyway
+    _is_local = _is_ollama or _is_openai_compat
+    _default_concurrency = 1 if _is_local else 4
+    if concurrency == 0:
+        concurrency = int(os.getenv("CONCURRENCY", str(_default_concurrency)))
+    if concurrency > 1 and _is_local:
+        _warn(f"concurrency={concurrency} ignored for local providers (serialized server-side) — using 1")
+        concurrency = 1
+    if concurrency > 1:
+        _info(f"[dim]concurrency: [bold]{concurrency}[/bold] parallel chunks[/dim]")
 
     # Build fallback sequence
     _fallback_models: list[str] = []
@@ -279,6 +291,7 @@ def run(
                         is_image=is_image, timestamps=frame_timestamps,
                         endpoint=ep, req_headers=hdrs, is_ollama=is_olla,
                         no_stream_opts=is_oai, no_json_format=is_oai,
+                        concurrency=concurrency,
                     ), 0
                 except CostCapExceeded as e:
                     _err(str(e))

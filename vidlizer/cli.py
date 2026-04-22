@@ -340,6 +340,7 @@ def interactive_args(video: Path | None, output_format: str = "json") -> dict:
     args["dedup_threshold"] = 8
     args["no_transcript"] = False
     args["output_format"] = "json"
+    args["concurrency"] = 0  # 0 = auto-detect from provider
 
     return args
 
@@ -387,6 +388,8 @@ def _main() -> int:
                    help="Output format: json (default), summary (plain text), markdown")
     p.add_argument("--provider", choices=["openrouter", "ollama", "openai"], default=None,
                    help="AI provider: openrouter (cloud), ollama (local), openai (LM Studio/vLLM/any OpenAI-compat)")
+    p.add_argument("--concurrency", type=int, default=None,
+                   help="Parallel batch workers (default: 4 for OpenRouter, 1 for local providers)")
     p.add_argument("--stats", action="store_true",
                    help="Show token and cost usage statistics across all runs, then exit")
     p.add_argument("--clear-stats", action="store_true", dest="clear_stats",
@@ -479,6 +482,7 @@ def _main() -> int:
         if cli.dedup_threshold is not None:  iargs["dedup_threshold"] = cli.dedup_threshold
         if cli.verbose:                      iargs["verbose"] = True
         if cli.no_transcript:                iargs["no_transcript"] = True
+        if cli.concurrency is not None:      iargs["concurrency"] = cli.concurrency
         iargs["output_format"] = cli.output_format
 
         _print_config(iargs)
