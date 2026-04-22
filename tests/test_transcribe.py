@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from vidlizer.core import _merge_transcript
+from vidlizer.batch import merge_transcript as _merge_transcript
 from vidlizer.transcribe import has_audio
 
 

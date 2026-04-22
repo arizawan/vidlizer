@@ -5,7 +5,7 @@ import base64
 
 import pytest
 
-from vidlizer.core import _IMAGE_EXTS, encode_frame
+from vidlizer.frames import _IMAGE_EXTS, encode_frame
 
 
 def test_image_ext_set_contains_common_types():
@@ -31,7 +31,7 @@ def test_encode_frame_base64_is_valid(test_image_png):
 
 
 def test_encode_frame_jpeg(test_video, tmp_path):
-    from vidlizer.core import extract_frames
+    from vidlizer.frames import extract_frames
     frames = extract_frames(
         test_video, tmp_path, scale=320, max_frames=1,
         scene_threshold=0.0, fps=1.0, min_interval=0.0, verbose=False,
