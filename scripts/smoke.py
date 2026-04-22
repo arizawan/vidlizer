@@ -197,7 +197,7 @@ _VISION_HINTS = frozenset([
 ])
 
 # Minimal vision models for each local provider
-_OLLAMA_MINIMAL   = "qwen2.5vl:3b"          # ~2.3 GB
+_OLLAMA_MINIMAL   = "qwen2.5vl:3b"          # ~3.2 GB — smallest Ollama vision model with reliable JSON output
 _LMSTUDIO_MINIMAL = "mlx-community/Qwen2.5-VL-3B-Instruct-8bit"
 _OMLX_MINIMAL     = "mlx-community/Qwen2.5-VL-3B-Instruct-8bit"
 
@@ -280,7 +280,7 @@ def _setup_provider(
         console.print(f"       Installed: {', '.join(models[:4])}{'…' if len(models) > 4 else ''}")
 
     if prov_id == "ollama":
-        if _prompt_yn(f"Download minimal vision model ({_OLLAMA_MINIMAL}, ~2.3 GB)?"):
+        if _prompt_yn(f"Download minimal vision model ({_OLLAMA_MINIMAL}, ~3.2 GB)?"):
             ok = _ollama_pull(_OLLAMA_MINIMAL, host)
             if ok:
                 console.print(f"  [green]✓[/green]  Downloaded [bold]{_OLLAMA_MINIMAL}[/bold]")
@@ -825,24 +825,36 @@ def section_audio(video: Path, silent: Path, out: Path, model: str, provider: st
         _record("Transcription (mlx-whisper)", "skip", "not installed")
         return
 
-    from vidlizer.core import run
-    p = out / "transcript.json"
+    # Test transcribe() directly — decoupled from JSON analysis so JSON failures
+    # don't mask transcription failures.
+    from vidlizer.transcribe import transcribe, is_available
+    if not is_available():
+        from vidlizer.bootstrap import ensure_transcriber
+        ensure_transcriber(console)
     t0 = time.time()
-    rc = run(video=video, output=p, model=model, provider=provider,
-             batch_size=1, max_frames=6, verbose=False, timeout=240, no_transcript=False)
-    t = time.time() - t0
-
-    if rc == 0 and p.exists():
-        data = json.loads(p.read_text())
-        segments = data.get("transcript", [])
-        has_speech = any("speech" in s for s in data.get("flow", []))
-        # Pass if pipeline ran successfully; 0 segments is correct for a sine-tone asset
+    try:
+        segments = transcribe(video)
+        t = time.time() - t0
+        if segments is None:
+            _record("Transcription", "fail", "audio extract failed", t)
+            return
+        # 0 segments is correct for a sine-tone (no speech) asset
         _record("Transcription", "pass",
-                f"{len(segments)} segments  speech_merged={has_speech}", t,
+                f"{len(segments)} segments", t,
                 sub=([seg.get("text", "")[:60] for seg in segments[:3]]
                      or ["(no speech — sine-tone test asset)"]))
-    else:
-        _record("Transcription", "fail", f"rc={rc}", t)
+    except Exception as exc:
+        t = time.time() - t0
+        _record("Transcription", "fail", str(exc), t)
+        return
+
+    # Test merge_transcript integration via a minimal flow
+    from vidlizer.batch import merge_transcript
+    mock_flow = [{"step": 1, "timestamp_s": 0.0}]
+    merge_transcript(mock_flow, segments)
+    merged_ok = not segments or "speech" in mock_flow[0]
+    _record("merge_transcript", "pass" if merged_ok else "fail",
+            "speech injected into flow step" if merged_ok else "merge produced no speech key")
 
 
 # ---------------------------------------------------------------------------

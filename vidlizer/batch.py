@@ -35,7 +35,7 @@ Produce a single JSON object with a `flow` array. Each element MUST include:
 - timestamp_s: Approximate time in seconds when this step begins (from the nearest [t=Xs] label). null if no labels present.
 - phase: Logical section (e.g. "Introduction", "Demo", "Action", "Conclusion", "Navigation", "Dialogue").
 - scene: What is currently visible — the setting, screen, environment, or context.
-- subjects: Key people, objects, UI elements, or entities present.
+- subjects: (JSON array) Key people, objects, UI elements, or entities present.
 - action: What is happening — interaction, physical movement, narration, transition, or event.
 - text_visible: All readable text on screen (UI labels, captions, code, titles, overlays). Empty string if none.
 - context: Persistent state or background information relevant to this moment.
@@ -62,7 +62,7 @@ Return a JSON object with a `flow` array containing exactly one element:
 - step: 1
 - phase: "Image Analysis"
 - scene: Full description of what is visible — setting, environment, layout.
-- subjects: All people, objects, UI elements, or entities present.
+- subjects: (JSON array) All people, objects, UI elements, or entities present.
 - action: Any activity, state, or interaction evident in the image.
 - text_visible: All readable text (labels, captions, code, titles, overlays). Empty string if none.
 - context: Inferred purpose, brand, topic, or background information.
@@ -98,9 +98,12 @@ def parse_json(text: str | dict) -> dict:
             text = text[4:]
         text = text.rsplit("```", 1)[0]
     parsed = json.loads(text.strip())
-    if isinstance(parsed, list):
-        return {"flow": parsed}
-    return parsed
+    result = {"flow": parsed} if isinstance(parsed, list) else parsed
+    for step in result.get("flow", []):
+        if "subjects" in step and not isinstance(step["subjects"], list):
+            s = step["subjects"]
+            step["subjects"] = [s] if s else []
+    return result
 
 
 def merge_transcript(flow: list[dict], segments: list[dict]) -> None:
@@ -200,7 +203,7 @@ def call_model(
         _console.print(f"[yellow]⚠[/yellow]  {chunk_label} parse failed — asking model to repair")
         repair_payload: dict = {
             "model": model,
-            "messages": [{"role": "user", "content": PROMPT_REPAIR.format(broken_text=broken_text[:4000])}],
+            "messages": [{"role": "user", "content": PROMPT_REPAIR.format(broken_text=broken_text)}],
             "temperature": 0.0,
         }
         if not is_ollama and not no_json_format:
