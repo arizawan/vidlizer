@@ -775,6 +775,11 @@ def run(
         _err("ffmpeg not found on PATH")
         return 2
 
+    # Initialized here so fallback-sequence building below can reference them
+    _installed: list[str] = []
+    _base: str = ""
+    _local_api_key: str = ""
+
     if _is_ollama:
         _ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
         _endpoint: str | None = f"{_ollama_host}/api/chat"
@@ -792,12 +797,12 @@ def run(
     elif _is_openai_compat:
         _base = os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1").rstrip("/")
         _endpoint = f"{_base}/chat/completions"
-        _api_key = os.getenv("OPENAI_API_KEY", "lm-studio")
+        _local_api_key = os.getenv("OPENAI_API_KEY", "lm-studio")
         _req_headers = {
-            "Authorization": f"Bearer {_api_key}",
+            "Authorization": f"Bearer {_local_api_key}",
             "Content-Type": "application/json",
         }
-        api_key = _api_key
+        api_key = _local_api_key
         _live_models = []
         _info(f"provider: [bold]openai-compat[/bold]  [dim]{_base}[/dim]")
     else:
@@ -815,6 +820,20 @@ def run(
     if batch_size == 0:
         batch_size = 1
         _info("auto-set [bold]batch_size=1[/bold] (override with --batch-size)")
+
+    # Build fallback model sequence for local providers
+    _fallback_models: list[str] = []
+    if _is_ollama and _installed:
+        from vidlizer.models import get_ollama_fallback_sequence
+        _fallback_models = get_ollama_fallback_sequence(_installed, exclude=model)
+        if _fallback_models:
+            _info(f"[dim]fallback candidates: {', '.join(_fallback_models[:3])}[/dim]")
+    elif _is_openai_compat and _base:
+        from vidlizer.models import fetch_openai_compat_models, get_openai_fallback_sequence
+        _avail = fetch_openai_compat_models(_base, _local_api_key)
+        if len(_avail) > 1:
+            _fallback_models = get_openai_fallback_sequence(_avail, exclude=model)
+            _info(f"[dim]fallback candidates: {', '.join(_fallback_models[:3])}[/dim]")
 
     # Money-bleeding guardrails
     if max_frames > 200:
@@ -939,14 +958,23 @@ def run(
         data, rc = _try_model(model, tracker)
 
         if data is None and rc == -1:
-            # If a free model failed, auto-fallback to cheapest paid model
-            is_free = next((m["free"] for m in _live_models if m["id"] == model), model.endswith(":free"))
-            if is_free:
-                from vidlizer.models import get_cheapest_paid
-                fallback = get_cheapest_paid(_live_models)
-                _warn(f"free model failed — falling back to [bold]{fallback}[/bold]")
-                model = fallback
-                data, rc = _try_model(model, tracker)
+            if _fallback_models:
+                # Local providers: try curated fallback sequence
+                for _fb in _fallback_models:
+                    _warn(f"trying fallback: [bold]{_fb}[/bold]")
+                    data, rc = _try_model(_fb, tracker)
+                    if data is not None:
+                        model = _fb
+                        break
+            elif not _is_ollama and not _is_openai_compat:
+                # OpenRouter: free model → cheapest paid fallback
+                is_free = next((m["free"] for m in _live_models if m["id"] == model), model.endswith(":free"))
+                if is_free:
+                    from vidlizer.models import get_cheapest_paid
+                    fallback = get_cheapest_paid(_live_models)
+                    _warn(f"free model failed — falling back to [bold]{fallback}[/bold]")
+                    model = fallback
+                    data, rc = _try_model(model, tracker)
 
         if data is None:
             _err("all retries exhausted" if rc == -1 else "")

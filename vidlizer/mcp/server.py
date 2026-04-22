@@ -132,8 +132,6 @@ def _summary_text(data: dict, level: str = "medium") -> str:
 async def analyze_video(
     ctx: Context,
     path: str,
-    provider: str = "",
-    model: str = "",
     max_frames: int = 60,
     start: float | None = None,
     end: float | None = None,
@@ -155,15 +153,15 @@ async def analyze_video(
     - Local files: /absolute/path/to/video.mp4, image.png, document.pdf
     - URLs: YouTube, Vimeo, Loom, Twitter/X
 
+    Provider and model are set via MCP server environment variables (PROVIDER,
+    OPENAI_MODEL / OLLAMA_MODEL / OPENROUTER_MODEL). Fallback models are tried
+    automatically if the primary model fails.
+
     After analysis, use get_summary/get_step/get_phase to retrieve parts
     on demand instead of loading everything at once (saves tokens).
 
     Args:
         path: Local file path or URL
-        provider: 'ollama' (local Ollama), 'openai' (LM Studio / any OpenAI-compat server),
-                  or 'openrouter' (cloud, API key needed). Defaults to PROVIDER env var.
-        model: Model ID — Ollama name or OpenRouter slug (e.g. google/gemini-2.5-flash).
-               Defaults to OLLAMA_MODEL / OPENROUTER_MODEL env vars.
         max_frames: Max frames to extract (default 60, hard cap 200)
         start: Analyze from this timestamp in seconds
         end: Analyze up to this timestamp in seconds
@@ -171,15 +169,15 @@ async def analyze_video(
         min_interval: Min seconds between frames (default 2.0)
         fps: Fixed FPS extraction — overrides scene-change detection
         scale: Frame width in pixels (default 512)
-        batch_size: Frames per API call (0=auto; Ollama always uses 1)
+        batch_size: Frames per API call (0=auto, resolves to 1)
         dedup_threshold: Perceptual dedup Hamming distance (0=off, default 8)
         transcript: Auto-transcribe audio via Apple MLX Whisper (default True)
         max_cost_usd: Abort if spend exceeds this in USD (default 1.00)
         timeout: Per-request timeout in seconds (default 600)
         force_rerun: Re-analyze even if cached result exists (default False)
     """
-    _provider = (provider or os.getenv("PROVIDER", "")).lower()
-    _model = _resolve_model(_provider, model)
+    _provider = os.getenv("PROVIDER", "").lower()
+    _model = _resolve_model(_provider, "")
     progress_log: list[str] = []
 
     def _log(msg: str) -> None:

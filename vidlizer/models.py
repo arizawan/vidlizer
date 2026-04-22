@@ -12,16 +12,16 @@ import requests
 _CACHE_PATH = Path.home() / ".cache" / "vidlizer" / "models.json"
 _CACHE_TTL = 3600  # seconds
 
-# Curated local vision models that actually produce structured JSON output reliably.
-# Research notes: moondream (Ollama build broken, empty responses #4063),
-# llava-phi3 (4K ctx, poor JSON adherence), llava:7b (chatty, breaks JSON) — all dropped.
+# Curated local vision models validated for structured JSON output.
+# Dropped: moondream (empty responses #4063), llava-phi3 (4K ctx, poor JSON),
+#          llava:7b (chatty, JSON breaks), gemma:* text-only variants (no vision).
 OLLAMA_CURATED_MODELS: list[dict] = [
     {
         "id": "qwen2.5vl:3b",
         "name": "Qwen2.5-VL 3B",
         "size_gb": 3.2,
         "ram_gb": 5,
-        "desc": "Best CPU pick — 125K ctx, strong JSON, multi-image, 8 GB RAM needed",
+        "desc": "Best CPU pick — 128K ctx, strong JSON, multi-image, 5 GB RAM min",
         "recommended": True,
     },
     {
@@ -29,17 +29,103 @@ OLLAMA_CURATED_MODELS: list[dict] = [
         "name": "Qwen2.5-VL 7B",
         "size_gb": 6.0,
         "ram_gb": 9,
-        "desc": "Best local quality — 125K ctx, best JSON accuracy, needs 10+ GB RAM",
-        "recommended": False,
+        "desc": "Best Ollama quality — 128K ctx, best JSON accuracy, 10+ GB RAM",
+        "recommended": True,
     },
     {
         "id": "minicpm-v:8b",
         "name": "MiniCPM-V 8B",
         "size_gb": 5.5,
         "ram_gb": 8,
-        "desc": "Strong OCR + visual reasoning, 32K ctx, multi-image, needs 10+ GB RAM",
+        "desc": "Strong OCR + visual reasoning, 32K ctx, multi-image, 10+ GB RAM",
         "recommended": False,
     },
+    {
+        "id": "llava-onevision:7b",
+        "name": "LLaVA-OneVision 7B",
+        "size_gb": 5.5,
+        "ram_gb": 8,
+        "desc": "Strong multi-image + video frames, reliable JSON, 8+ GB RAM",
+        "recommended": False,
+    },
+]
+
+# Curated OpenAI-compat models (LM Studio / vLLM / LocalAI) — validated for JSON output.
+# Notes: Qwen3-VL outputs <think> tags (stripped automatically). Gemma 4 E4B requires
+# LM Studio 0.3.16+. GLM-4.6V requires zai-org builds.
+OPENAI_CURATED_MODELS: list[dict] = [
+    {
+        "id": "qwen/qwen2.5-vl-7b-instruct",
+        "name": "Qwen2.5-VL 7B",
+        "vram_gb": 8,
+        "desc": "Best all-rounder — 128K ctx, reliable JSON, multi-image, LM Studio ready",
+        "recommended": True,
+    },
+    {
+        "id": "qwen/qwen3-vl-8b",
+        "name": "Qwen3-VL 8B",
+        "vram_gb": 10,
+        "desc": "Latest Qwen vision — video + multi-image, thinking tags stripped automatically",
+        "recommended": True,
+    },
+    {
+        "id": "qwen/qwen2.5-vl-3b-instruct",
+        "name": "Qwen2.5-VL 3B",
+        "vram_gb": 5,
+        "desc": "Lightweight — 128K ctx, fast, 5-6 GB VRAM",
+        "recommended": False,
+    },
+    {
+        "id": "google/gemma-4-e4b-it",
+        "name": "Gemma 4 E4B",
+        "vram_gb": 6,
+        "desc": "Google MoE — native LM Studio support (v0.3.16+), efficient inference",
+        "recommended": False,
+    },
+    {
+        "id": "google/gemma-4-9b-it",
+        "name": "Gemma 4 9B",
+        "vram_gb": 10,
+        "desc": "Stronger Gemma 4 variant — 128K ctx, better instruction following",
+        "recommended": False,
+    },
+    {
+        "id": "zai-org/glm-4.6v-flash",
+        "name": "GLM-4.6V Flash",
+        "vram_gb": 8,
+        "desc": "ZhipuAI MoE — 128K ctx, strong JSON, agent-oriented, low latency",
+        "recommended": False,
+    },
+    {
+        "id": "openbmb/minicpm-v-4.5",
+        "name": "MiniCPM-V 4.5",
+        "vram_gb": 8,
+        "desc": "8B Qwen3-based — strong OCR, multi-image, vLLM/SGLang ready",
+        "recommended": False,
+    },
+]
+
+# Ordered fallback sequences — tried in order when the primary model fails.
+# Ollama: matched against installed models (prefix match, e.g. qwen2.5vl:7b → qwen2.5vl).
+OLLAMA_FALLBACK_SEQUENCE: list[str] = [
+    "qwen2.5vl:7b",
+    "qwen2.5vl:3b",
+    "minicpm-v:8b",
+    "llava-onevision:7b",
+    "llava:13b",
+    "llava:7b",
+]
+
+# OpenAI-compat: matched as substrings against model IDs returned by /v1/models.
+OPENAI_FALLBACK_FRAGMENTS: list[str] = [
+    "qwen2.5-vl-7b",
+    "qwen2.5-vl-3b",
+    "qwen3-vl",
+    "gemma-4",
+    "glm-4",
+    "minicpm-v",
+    "llava-onevision",
+    "llava",
 ]
 
 _FALLBACK: list[dict] = [
@@ -91,6 +177,53 @@ def fetch_ollama_models(host: str = "http://localhost:11434") -> list[str]:
         return [m["name"] for m in r.json().get("models", [])]
     except Exception:
         return []
+
+
+def fetch_openai_compat_models(base_url: str, api_key: str) -> list[str]:
+    """Query /v1/models from an OpenAI-compat server. Returns available model IDs."""
+    try:
+        r = requests.get(
+            f"{base_url.rstrip('/')}/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=5,
+        )
+        r.raise_for_status()
+        return [m["id"] for m in r.json().get("data", [])]
+    except Exception:
+        return []
+
+
+def get_openai_fallback_sequence(available: list[str], exclude: str = "") -> list[str]:
+    """From available server models, return fallback candidates in preferred order.
+
+    Matches by substring against OPENAI_FALLBACK_FRAGMENTS. Models not in the
+    preference list are appended at the end. The currently-active model is excluded.
+    """
+    result: list[str] = []
+    seen: set[str] = set()
+    for fragment in OPENAI_FALLBACK_FRAGMENTS:
+        for m in available:
+            if fragment.lower() in m.lower() and m != exclude and m not in seen:
+                result.append(m)
+                seen.add(m)
+    for m in available:
+        if m != exclude and m not in seen:
+            result.append(m)
+            seen.add(m)
+    return result
+
+
+def get_ollama_fallback_sequence(installed: list[str], exclude: str = "") -> list[str]:
+    """From installed Ollama models, return fallback candidates in preferred order."""
+    result: list[str] = []
+    seen: set[str] = set()
+    for preferred in OLLAMA_FALLBACK_SEQUENCE:
+        pbase = preferred.split(":")[0]
+        for m in installed:
+            if m.split(":")[0] == pbase and m != exclude and m not in seen:
+                result.append(m)
+                seen.add(m)
+    return result
 
 
 def fetch_models(api_key: str | None = None, force_refresh: bool = False) -> list[dict]:
