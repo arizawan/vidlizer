@@ -160,8 +160,8 @@ async def analyze_video(
 
     Args:
         path: Local file path or URL
-        provider: 'ollama' (local, free) or 'openrouter' (cloud, API key needed).
-                  Defaults to PROVIDER env var.
+        provider: 'ollama' (local Ollama), 'openai' (LM Studio / any OpenAI-compat server),
+                  or 'openrouter' (cloud, API key needed). Defaults to PROVIDER env var.
         model: Model ID — Ollama name or OpenRouter slug (e.g. google/gemini-2.5-flash).
                Defaults to OLLAMA_MODEL / OPENROUTER_MODEL env vars.
         max_frames: Max frames to extract (default 60, hard cap 200)
@@ -186,95 +186,105 @@ async def analyze_video(
         progress_log.append(msg)
         _logger.info(msg)
 
-    params = {
-        "provider": _provider, "model": _model, "max_frames": max_frames,
-        "start": start, "end": end, "scene_threshold": scene_threshold,
-        "min_interval": min_interval, "fps": fps, "scale": scale,
-        "batch_size": batch_size, "dedup_threshold": dedup_threshold,
-        "transcript": transcript,
-    }
-    aid = store.make_id(path, params)
+    try:
+        params = {
+            "provider": _provider, "model": _model, "max_frames": max_frames,
+            "start": start, "end": end, "scene_threshold": scene_threshold,
+            "min_interval": min_interval, "fps": fps, "scale": scale,
+            "batch_size": batch_size, "dedup_threshold": dedup_threshold,
+            "transcript": transcript,
+        }
+        aid = store.make_id(path, params)
 
-    if not force_rerun and store.exists(aid):
-        _log(f"Cache hit: {aid}")
-        rec = store.load(aid)
-        return {**_meta(rec), "cached": True, "progress_log": progress_log}
+        if not force_rerun and store.exists(aid):
+            _log(f"Cache hit: {aid}")
+            rec = store.load(aid)
+            return {**_meta(rec), "cached": True, "progress_log": progress_log}  # type: ignore[arg-type]
 
-    _log(f"Starting analysis: {path}")
-    _log(f"Provider: {_provider or 'from env'} | Model: {_model}")
-    await ctx.report_progress(0, 100)
+        _log(f"Starting analysis: {path}")
+        _log(f"Provider: {_provider or 'from env'} | Model: {_model}")
+        await ctx.report_progress(0, 100)
 
-    # URL download
-    url_ctx: contextlib.AbstractContextManager = contextlib.nullcontext(None)
-    local_path = path
+        # URL download
+        url_ctx: contextlib.AbstractContextManager = contextlib.nullcontext(None)
+        local_path = path
 
-    from vidlizer.downloader import is_url
-    if is_url(path):
-        from vidlizer.downloader import download
-        _log("Downloading video from URL…")
-        await ctx.report_progress(10, 100)
-        url_tmp = tempfile.TemporaryDirectory(prefix="vidlizer_dl_")
-        url_ctx = url_tmp
-        try:
-            local_path = str(await asyncio.to_thread(download, path, Path(url_tmp.name)))
-            _log(f"Downloaded: {Path(local_path).name}")
-        except Exception as e:
-            _log(f"Download failed: {e}")
-            return {"error": f"Download failed: {e}", "analysis_id": None, "progress_log": progress_log}
-
-    _log(f"Extracting frames (max {max_frames}) and sending to {_model}…")
-    await ctx.report_progress(20, 100)
-
-    def _run_analysis() -> tuple[int, dict]:
-        from vidlizer.core import run
-        if _provider:
-            os.environ["PROVIDER"] = _provider
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
-            tmp_out = Path(f.name)
-        rc = run(
-            video=Path(local_path), output=tmp_out, model=_model, provider=_provider,
-            scene=scene_threshold, min_interval=min_interval, fps=fps, scale=scale,
-            max_frames=max_frames, batch_size=batch_size, timeout=timeout,
-            verbose=False, max_cost=max_cost_usd, start=start, end=end,
-            dedup_threshold=dedup_threshold, no_transcript=not transcript,
-            output_format="json",
-        )
-        data: dict = {}
-        if tmp_out.exists():
+        from vidlizer.downloader import is_url
+        if is_url(path):
+            from vidlizer.downloader import download
+            _log("Downloading video from URL…")
+            await ctx.report_progress(10, 100)
+            url_tmp = tempfile.TemporaryDirectory(prefix="vidlizer_dl_")
+            url_ctx = url_tmp
             try:
-                data = json.loads(tmp_out.read_text())
-            except Exception:
-                pass
-            tmp_out.unlink(missing_ok=True)
-        return rc, data
+                local_path = str(await asyncio.to_thread(download, path, Path(url_tmp.name)))
+                _log(f"Downloaded: {Path(local_path).name}")
+            except Exception as e:
+                _log(f"Download failed: {e}")
+                return {"error": f"Download failed: {e}", "analysis_id": None, "progress_log": progress_log}
 
-    with url_ctx:
-        await ctx.report_progress(25, 100)
-        rc, data = await asyncio.to_thread(_run_analysis)
+        _log(f"Extracting frames (max {max_frames}) and sending to {_model}…")
+        await ctx.report_progress(20, 100)
 
-    await ctx.report_progress(90, 100)
+        def _run_analysis() -> tuple[int, dict]:
+            from vidlizer.core import run
+            if _provider:
+                os.environ["PROVIDER"] = _provider
+            with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
+                tmp_out = Path(f.name)
+            try:
+                rc = run(
+                    video=Path(local_path), output=tmp_out, model=_model, provider=_provider,
+                    scene=scene_threshold, min_interval=min_interval, fps=fps, scale=scale,
+                    max_frames=max_frames, batch_size=batch_size, timeout=timeout,
+                    verbose=False, max_cost=max_cost_usd, start=start, end=end,
+                    dedup_threshold=dedup_threshold, no_transcript=not transcript,
+                    output_format="json",
+                )
+            except Exception as exc:
+                _logger.exception("core.run() raised: %s", exc)
+                tmp_out.unlink(missing_ok=True)
+                return 1, {}
+            data: dict = {}
+            if tmp_out.exists():
+                try:
+                    data = json.loads(tmp_out.read_text())
+                except Exception:
+                    pass
+                tmp_out.unlink(missing_ok=True)
+            return rc, data
 
-    if rc != 0 or not data:
-        _log(f"Analysis failed (exit code {rc})")
-        return {"error": f"Analysis failed (exit code {rc})", "analysis_id": None, "progress_log": progress_log}
+        with url_ctx:
+            await ctx.report_progress(25, 100)
+            rc, data = await asyncio.to_thread(_run_analysis)
 
-    steps = len(data.get("flow", []))
-    _log(f"Analysis complete: {steps} steps extracted")
-    if data.get("transcript"):
-        _log(f"Transcript: {len(data['transcript'])} segments")
+        await ctx.report_progress(90, 100)
 
-    store.save(aid, path, params, data)
-    _log(f"Saved as analysis_id={aid}")
-    await ctx.report_progress(100, 100)
+        if rc != 0 or not data:
+            _log(f"Analysis failed (exit code {rc})")
+            return {"error": f"Analysis failed (exit code {rc})", "analysis_id": None, "progress_log": progress_log}
 
-    rec = store.load(aid)
-    result = {**_meta(rec), "cached": False, "progress_log": progress_log}
-    result["next_steps"] = (
-        f"Call get_summary('{aid}') for an overview, "
-        f"get_phase('{aid}', '<phase>') for a section, "
-        f"or search_analysis('{aid}', '<keyword>') to find specific moments."
-    )
-    return result
+        steps = len(data.get("flow", []))
+        _log(f"Analysis complete: {steps} steps extracted")
+        if data.get("transcript"):
+            _log(f"Transcript: {len(data['transcript'])} segments")
+
+        store.save(aid, path, params, data)
+        _log(f"Saved as analysis_id={aid}")
+        await ctx.report_progress(100, 100)
+
+        rec = store.load(aid)
+        result = {**_meta(rec), "cached": False, "progress_log": progress_log}  # type: ignore[arg-type]
+        result["next_steps"] = (
+            f"Call get_summary('{aid}') for an overview, "
+            f"get_phase('{aid}', '<phase>') for a section, "
+            f"or search_analysis('{aid}', '<keyword>') to find specific moments."
+        )
+        return result
+
+    except Exception as exc:
+        _logger.exception("analyze_video failed")
+        return {"error": str(exc), "analysis_id": None, "progress_log": progress_log}
 
 
 @app.tool()

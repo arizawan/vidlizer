@@ -100,9 +100,10 @@ def test_second_run_is_cache_hit(test_video, tmp_path):
             start=None, end=None, dedup_threshold=0,
         )
         run(test_video, out, **params)
+        count_after_first = call_count[0]
         run(test_video, out, **params)
 
-    assert call_count[0] == 1  # second run served from cache
+    assert call_count[0] == count_after_first  # second run served from cache, no new API calls
 
 
 # ---------------------------------------------------------------------------

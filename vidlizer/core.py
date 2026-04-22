@@ -667,6 +667,11 @@ def parse_json(text: str | dict) -> dict:
             "model may not support vision or context window exceeded",
             "", 0,
         )
+    # Strip thinking/reasoning blocks (Qwen3, DeepSeek-R1, etc.)
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+    text = re.sub(r'<\|think\|>.*?<\|/think\|>', '', text, flags=re.DOTALL).strip()
+    if not text:
+        raise json.JSONDecodeError("model returned only thinking content, no JSON found", "", 0)
     if text.startswith("```"):
         text = text.split("```", 2)[1]
         if text.startswith("json"):
@@ -806,10 +811,10 @@ def run(
         with _console.status("[dim]fetching model pricing…[/dim]", spinner="dots2"):
             _live_models = fetch_models(api_key)
 
-    # Local providers: default batch_size=1 (safe for any local model)
-    if (_is_ollama or _is_openai_compat) and batch_size == 0:
+    # Default batch_size=1 for all providers — avoids context limits on any model
+    if batch_size == 0:
         batch_size = 1
-        _info("local: auto-set [bold]batch_size=1[/bold] (override with --batch-size)")
+        _info("auto-set [bold]batch_size=1[/bold] (override with --batch-size)")
 
     # Money-bleeding guardrails
     if max_frames > 200:
