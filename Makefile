@@ -1,4 +1,4 @@
-.PHONY: test test-e2e install-dev
+.PHONY: test test-e2e smoke install-dev
 
 VENV := .venv
 PY   := $(VENV)/bin/python
@@ -23,3 +23,9 @@ test-e2e:
 		-q
 	@echo ""
 	@echo "Report: reports/test-report-e2e.html"
+
+smoke:
+	@mkdir -p reports
+	$(PY) scripts/smoke.py $(ARGS)
+	@echo ""
+	@echo "Open: open reports/smoke-*.html | ls -t reports/smoke-*.html | head -1"
