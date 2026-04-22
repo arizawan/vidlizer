@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-106%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-223%20passing-brightgreen.svg)](#testing)
 
 ![demo](assets/demo.gif)
 
@@ -17,7 +17,7 @@
 
 vidlizer extracts frames with ffmpeg, sends them to a vision model, and writes a `flow` array describing every scene, action, and visible text. For videos with audio it automatically transcribes speech with Apple MLX Whisper and merges it into each step.
 
-Three provider modes: **local** via [Ollama](https://ollama.com) (no API key, no cost), **OpenAI-compatible** servers (LM Studio, vLLM, LocalAI), or **cloud** via [OpenRouter](https://openrouter.ai).
+Four provider modes: **local** via [Ollama](https://ollama.com) (no API key, no cost), **LM Studio** (port 1234), **oMLX** (Apple Silicon native, port 8000), or **cloud** via [OpenRouter](https://openrouter.ai).
 
 ```bash
 vidlizer demo.mp4
@@ -31,8 +31,10 @@ vidlizer document.pdf
 ## ✨ Features
 
 - **Any input** — local video, image (jpg/png/webp/…), PDF, or URL (YouTube, Loom, Vimeo, Twitter)
-- **3 providers** — Ollama (fully offline), OpenAI-compatible (LM Studio/oMLX/vLLM), OpenRouter (cloud)
+- **4 providers** — Ollama (fully offline), LM Studio (port 1234), oMLX (Apple Silicon, port 8000), OpenRouter (cloud) — auto-detected in that order
 - **Cross-provider fallback** — primary model fails → automatically switches provider (e.g. oMLX → OpenRouter)
+- **JSON repair** — malformed model output is re-sent to the model to fix before skipping; recovers from partial JSON
+- **Free-model guard** — `:free` OpenRouter models auto-force `concurrency=1` to stay within rate limits
 - **3 output formats** — `--format json` (default), `summary` (plain text by phase), `markdown` (step-per-section doc)
 - **Usage tracking** — `--stats` shows per-model token + cost breakdown across all runs; `get_usage_stats()` MCP tool
 - **Auto transcript** — detects audio, transcribes with Apple MLX Whisper (Neural Engine), merges speech into each flow step
@@ -214,7 +216,7 @@ GPU-accelerated inference via any OpenAI-compatible server. Set `PROVIDER=openai
 | `zai-org/glm-4.6v-flash` | ~8 GB | ZhipuAI MoE — 128K ctx, strong JSON, low latency |
 | `openbmb/minicpm-v-4.5` | ~8 GB | 8B Qwen3-based — strong OCR, multi-image, vLLM ready |
 
-**oMLX** (Apple Silicon native, [omlx.ai](https://omlx.ai)) — MLX-format models from HuggingFace, default port 8000. Model IDs are HuggingFace paths:
+**oMLX** (Apple Silicon native, [omlx.ai](https://omlx.ai)) — MLX-format models from HuggingFace, **auto-detected on port 8000** (distinct from LM Studio). Model IDs are HuggingFace paths:
 
 | oMLX Model | Unified RAM | Notes |
 |---|---|---|
@@ -270,7 +272,7 @@ positional:
 options:
   -o, --output PATH     Output path (default: <name>.analysis.json/.md/.txt)
   --format FORMAT       Output format: json (default), summary, markdown
-  --provider PROVIDER   ollama | openai | openrouter
+  --provider PROVIDER   ollama | openai | openrouter  (openai covers LM Studio + oMLX + vLLM)
   --model MODEL         Model slug — Ollama name, OpenAI-compat ID, or OpenRouter slug
   --max-frames N        Max frames to send (default 60, hard cap 200)
   --start SECONDS       Analyze from this timestamp
@@ -637,23 +639,44 @@ agent: search_analysis("abc123", "error")
 
 ## 🧪 Testing
 
-Fully automated test suite — **106 unit + integration tests, 3 e2e tests**.
+Fully automated test suite — **223 unit + integration tests, 3 e2e tests**.
 
 ```bash
 make install-dev    # installs pytest, pytest-html, pytest-mock
-make test           # runs unit + integration (no network) → HTML report
+make test           # runs unit + integration (no network) → reports/test-report.html
 make test-e2e       # also runs YouTube download + full pipeline e2e
+make smoke          # real-provider smoke test against all detected providers
 ```
 
-Reports land in `reports/test-report.html`. Tests cover:
+Unit/integration report: `reports/test-report.html`. Tests cover:
 
 - Frame extraction (ffmpeg), perceptual dedup, cache TTL
 - Audio detection, transcript merge (no duplicates)
 - PDF → frames, image encoding, URL detection
 - Output formatter: json/summary/markdown correctness
 - Full pipeline with mocked OpenRouter (fake HTTP server)
+- HTTP layer: SSE parsing, 429 handling, cost cap, Ollama streaming
+- Batch: JSON repair retry, free-model concurrency guard
+- Models: pricing lookup, fallback sequences, format helpers
+- Usage tracking: record/stats/clear lifecycle
 - Real CLI subprocess invocations against real media
 - Real YouTube download + full analysis (opt-in `-m e2e`)
+
+### Smoke test
+
+`make smoke` runs the full real-provider pipeline against every detected provider in order (Ollama → LM Studio → oMLX → OpenRouter). Before tests start, it interactively prompts for each local provider:
+
+- Vision model found → `"Test ollama with qwen2.5vl:3b? [Y/n]"`
+- No vision model (Ollama) → `"Download qwen2.5vl:3b (~2.3 GB)? [y/N]"`
+- No vision model (LM Studio/oMLX) → instructions to load one + retry prompt
+
+Each provider is tested in isolation with its own output directory (prevents cache contamination). Local models are unloaded from VRAM after each provider's tests. Results land in `reports/smoke-TIMESTAMP.html` with per-provider pass/fail scorecards.
+
+```bash
+make smoke                                  # auto-detect all providers
+make smoke ARGS="--provider ollama"         # force single provider
+make smoke ARGS="--provider openrouter"     # OpenRouter only (no local needed)
+```
 
 ---
 
