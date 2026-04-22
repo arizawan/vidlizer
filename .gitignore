@@ -20,6 +20,9 @@ dist/
 *.analysis.json
 *.raw.txt
 
+# test reports (HTML generated on each run)
+reports/*.html
+
 # editor / os
 .DS_Store
 .vscode/

@@ -12,6 +12,22 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
+# HTML report hooks (pytest-html)
+# ---------------------------------------------------------------------------
+
+def pytest_configure(config) -> None:
+    config.addinivalue_line("markers", "e2e: end-to-end tests requiring real network / API key")
+    if hasattr(config, "_metadata"):
+        config._metadata["Project"] = "vidlizer"
+        config._metadata["Version"] = "0.1.0"
+        config._metadata["Docs"] = "https://github.com/arizawan/vidlizer"
+
+
+def pytest_html_report_title(report) -> None:
+    report.title = "vidlizer — Test Suite Report"
+
+
+# ---------------------------------------------------------------------------
 # Canonical mock flow returned by the fake OpenRouter server
 # ---------------------------------------------------------------------------
 
