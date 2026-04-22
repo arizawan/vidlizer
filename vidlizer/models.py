@@ -50,9 +50,10 @@ OLLAMA_CURATED_MODELS: list[dict] = [
     },
 ]
 
-# Curated OpenAI-compat models (LM Studio / vLLM / LocalAI) — validated for JSON output.
+# Curated OpenAI-compat models (LM Studio / oMLX / vLLM / LocalAI) — validated for JSON output.
 # Notes: Qwen3-VL outputs <think> tags (stripped automatically). Gemma 4 E4B requires
 # LM Studio 0.3.16+. GLM-4.6V requires zai-org builds.
+# oMLX (Apple Silicon, port 8000): use mlx-community/ model IDs shown below.
 OPENAI_CURATED_MODELS: list[dict] = [
     {
         "id": "qwen/qwen2.5-vl-7b-instruct",
@@ -101,6 +102,35 @@ OPENAI_CURATED_MODELS: list[dict] = [
         "name": "MiniCPM-V 4.5",
         "vram_gb": 8,
         "desc": "8B Qwen3-based — strong OCR, multi-image, vLLM/SGLang ready",
+        "recommended": False,
+    },
+    # oMLX (Apple Silicon MLX format) — use with OPENAI_BASE_URL=http://localhost:8000/v1
+    {
+        "id": "mlx-community/Qwen2.5-VL-7B-Instruct-8bit",
+        "name": "Qwen2.5-VL 7B (MLX)",
+        "vram_gb": 8,
+        "desc": "oMLX / Apple Silicon — 128K ctx, reliable JSON, unified RAM",
+        "recommended": True,
+    },
+    {
+        "id": "mlx-community/Qwen2.5-VL-3B-Instruct-8bit",
+        "name": "Qwen2.5-VL 3B (MLX)",
+        "vram_gb": 4,
+        "desc": "oMLX / Apple Silicon — lightweight, 4-5 GB unified RAM",
+        "recommended": False,
+    },
+    {
+        "id": "mlx-community/Qwen3-VL-8B-8bit",
+        "name": "Qwen3-VL 8B (MLX)",
+        "vram_gb": 9,
+        "desc": "oMLX / Apple Silicon — latest Qwen vision, thinking tags stripped",
+        "recommended": False,
+    },
+    {
+        "id": "mlx-community/MiniCPM-V-2_6-8bit",
+        "name": "MiniCPM-V 2.6 (MLX)",
+        "vram_gb": 8,
+        "desc": "oMLX / Apple Silicon — strong OCR + reasoning",
         "recommended": False,
     },
 ]

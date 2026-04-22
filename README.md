@@ -31,18 +31,19 @@ vidlizer document.pdf
 ## ✨ Features
 
 - **Any input** — local video, image (jpg/png/webp/…), PDF, or URL (YouTube, Loom, Vimeo, Twitter)
-- **3 providers** — Ollama (fully offline), OpenAI-compatible (LM Studio/vLLM), OpenRouter (cloud)
-- **Automatic fallback** — if a model fails, tries next best available model automatically
+- **3 providers** — Ollama (fully offline), OpenAI-compatible (LM Studio/oMLX/vLLM), OpenRouter (cloud)
+- **Cross-provider fallback** — primary model fails → automatically switches provider (e.g. oMLX → OpenRouter)
 - **3 output formats** — `--format json` (default), `summary` (plain text by phase), `markdown` (step-per-section doc)
+- **Usage tracking** — `--stats` shows per-model token + cost breakdown across all runs; `get_usage_stats()` MCP tool
 - **Auto transcript** — detects audio, transcribes with Apple MLX Whisper (Neural Engine), merges speech into each flow step
 - **Perceptual dedup** — removes near-duplicate frames before sending (saves tokens)
 - **analyze_moment** — `--start`/`--end` flags to focus on a time range
 - **In-memory cache** — repeat runs on the same file skip the API call
 - **Cost guard** — aborts if spend exceeds `MAX_COST_USD` (default $1.00)
 - **Live progress** — Rich streaming indicator shows elapsed time and token count per batch
-- **MCP server** — use from Claude Code, Cursor, Claude Desktop; provider/model locked via env vars
+- **MCP server** — use from Claude Code, Cursor, Claude Desktop; provider/model locked via env vars; result includes `model_used` + `provider_used`
 - **Auto-install** — missing `ffmpeg` is brew-installed; `mlx-whisper` is pip-installed on first audio video
-- **Mac-native** — file picker dialog, Apple MLX transcription, osascript integration
+- **Mac-native** — file picker dialog, Apple MLX transcription, handles macOS Unicode filenames (e.g. "11:26 AM")
 
 ---
 
@@ -154,9 +155,13 @@ Default output path is `<normalized-name>.analysis.json` (or matching extension)
   ],
   "transcript": [
     { "start": 0.0, "end": 2.4, "text": "Welcome to the vidlizer demo." }
-  ]
+  ],
+  "model_used": "gemma-4-E2B-it-MLX-4bit",
+  "provider_used": "openai"
 }
 ```
+
+`model_used` and `provider_used` reflect the model that actually produced the result — including after fallback. Surfaced in MCP `analyze_video` response so agents know which provider ran.
 
 ### Flow step fields
 
@@ -195,7 +200,7 @@ Fallback order (if configured model unavailable): `qwen2.5vl:7b` → `qwen2.5vl:
 
 Uses Ollama's native `/api/chat` with `format: json` for reliable structured output.
 
-### Local — LM Studio / vLLM / LocalAI (OpenAI-compatible)
+### Local — LM Studio / oMLX / vLLM / LocalAI (OpenAI-compatible)
 
 GPU-accelerated inference via any OpenAI-compatible server. Set `PROVIDER=openai` and point `OPENAI_BASE_URL` at your server.
 
@@ -209,9 +214,18 @@ GPU-accelerated inference via any OpenAI-compatible server. Set `PROVIDER=openai
 | `zai-org/glm-4.6v-flash` | ~8 GB | ZhipuAI MoE — 128K ctx, strong JSON, low latency |
 | `openbmb/minicpm-v-4.5` | ~8 GB | 8B Qwen3-based — strong OCR, multi-image, vLLM ready |
 
-Model IDs are as shown in LM Studio's model browser or your vLLM config. LM Studio serves one model at a time (no fallback needed). vLLM with multiple models loaded uses the same fallback sequence.
+**oMLX** (Apple Silicon native, [omlx.ai](https://omlx.ai)) — MLX-format models from HuggingFace, default port 8000. Model IDs are HuggingFace paths:
 
-Fallback fragment order (vLLM): `qwen2.5-vl-7b` → `qwen2.5-vl-3b` → `qwen3-vl` → `gemma-4` → `glm-4` → `minicpm-v` → `llava-onevision` → `llava`
+| oMLX Model | Unified RAM | Notes |
+|---|---|---|
+| `mlx-community/Qwen2.5-VL-7B-Instruct-8bit` ★ | ~8 GB | Best Apple Silicon pick — fast, strong JSON |
+| `mlx-community/Qwen2.5-VL-3B-Instruct-8bit` | ~4 GB | Lightweight — 4–5 GB RAM |
+| `mlx-community/Qwen3-VL-8B-8bit` | ~9 GB | Latest Qwen vision — thinking tags stripped |
+| `mlx-community/MiniCPM-V-2_6-8bit` | ~8 GB | Strong OCR + reasoning |
+
+Model IDs are as shown in LM Studio's model browser, oMLX's admin panel, or your vLLM config. LM Studio / oMLX serve one model at a time (no fallback needed). vLLM with multiple models loaded uses the same fallback sequence.
+
+Fallback fragment order (vLLM / oMLX with multiple models): `qwen2.5-vl-7b` → `qwen2.5-vl-3b` → `qwen3-vl` → `gemma-4` → `glm-4` → `minicpm-v` → `llava-onevision` → `llava`
 
 ### Cloud — OpenRouter
 
@@ -271,6 +285,8 @@ options:
   --max-cost USD        Abort if spend exceeds this (default 1.00)
   --timeout SECS        Per-request timeout (default 600)
   -v, --verbose         Debug output
+  --stats               Show token + cost usage stats by model, then exit
+  --clear-stats         Reset usage log, then exit
 ```
 
 ---
@@ -280,17 +296,21 @@ options:
 Copy `env.sample` to `.env`:
 
 ```bash
-# Provider: ollama | openai | openrouter
+# ── Provider ────────────────────────────────────────────────────────────────
+# ollama    — local Ollama server (no API key, no cost)
+# openai    — any OpenAI-compatible server (LM Studio, oMLX, vLLM, LocalAI, real OpenAI)
+# openrouter — cloud inference via OpenRouter
 PROVIDER=ollama
 
 # ── Ollama (local, no API key) ──────────────────────────────────────────────
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=qwen2.5vl:3b
 
-# ── OpenAI-compatible (LM Studio, vLLM, LocalAI, real OpenAI) ───────────────
-OPENAI_BASE_URL=http://localhost:1234/v1   # LM Studio default
-OPENAI_API_KEY=lm-studio                  # use "not-needed" for vLLM
-OPENAI_MODEL=qwen/qwen2.5-vl-7b-instruct  # must match model ID in server
+# ── OpenAI-compatible (LM Studio, oMLX, vLLM, LocalAI, real OpenAI) ─────────
+#   LM Studio default port: 1234  |  oMLX default port: 8000  |  vLLM: 8000
+OPENAI_BASE_URL=http://localhost:1234/v1
+OPENAI_API_KEY=lm-studio        # "not-needed" for oMLX/vLLM, real key for OpenAI
+OPENAI_MODEL=                   # exact model ID as shown in server (required)
 
 # ── OpenRouter (cloud) ──────────────────────────────────────────────────────
 OPENROUTER_API_KEY=sk-or-v1-...
@@ -302,9 +322,49 @@ MIN_INTERVAL=2          # seconds between forced frames
 MAX_FRAMES=60
 FRAME_WIDTH=512
 MAX_COST_USD=1.00
-BATCH_SIZE=0            # 0 = auto (defaults to 1 frame per request for all providers)
+BATCH_SIZE=0            # 0 = auto (defaults to 1 per request for all providers)
 REQUEST_TIMEOUT=600
+
+# ── Fallback ────────────────────────────────────────────────────────────────
+# Same-provider fallback: set FALLBACK_MODEL only.
+#   Blank = auto-detect installed models (Ollama) or available models (OpenAI-compat).
+# Cross-provider fallback: set FALLBACK_PROVIDER + FALLBACK_MODEL.
+#   FALLBACK_BASE_URL and FALLBACK_API_KEY default to the primary provider's values
+#   if not set — override only when the fallback uses a different server/key.
+FALLBACK_PROVIDER=      # ollama | openai | openrouter  (blank = same as PROVIDER)
+FALLBACK_MODEL=         # model ID for fallback  (blank = auto-detect same-provider)
+FALLBACK_BASE_URL=      # base URL for fallback openai/ollama server (optional)
+FALLBACK_API_KEY=       # API key for fallback provider (optional)
 ```
+
+---
+
+## 📊 Usage tracking
+
+Every successful run appends a record to `~/.cache/vidlizer/usage.jsonl`. Test runs (`pytest`) are excluded.
+
+```bash
+vidlizer --stats          # print per-model breakdown
+vidlizer --clear-stats    # reset log
+```
+
+Example output:
+
+```
+Usage statistics  (/Users/you/.cache/vidlizer/usage.jsonl)
+
+  Total runs:       12
+  Total tokens in:  58,240
+  Total tokens out: 6,102
+  Total cost:       ~$0.0312
+  Total steps:      94
+
+  Model                               Provider     Runs   Tokens in  Tokens out  Cost USD
+  gemma-4-E2B-it-MLX-4bit             openai          9      45,800       4,900      free
+  google/gemini-2.5-flash             openrouter       3      12,440       1,202  ~$0.0312
+```
+
+Also available as MCP tool: `get_usage_stats()` → same data as JSON. `clear_usage_stats()` resets the log.
 
 ---
 
@@ -324,17 +384,12 @@ pip install -e ".[mcp]"   # adds mcp package + vidlizer-mcp entry point
 
 Use the **absolute path** to the venv binary — no shell activation needed. Run `which vidlizer-mcp` inside the venv to get the path.
 
-#### OpenRouter (cloud)
+All configs below use JSON format (works in Claude Code, Cursor, Claude Desktop, Gemini CLI). For `claude mcp add` CLI form, replace `"env": { "KEY": "val" }` with `-e KEY=val` flags.
 
-**Claude Code:**
-```bash
-claude mcp add vidlizer /path/to/.venv/bin/vidlizer-mcp \
-  -e PROVIDER=openrouter \
-  -e OPENROUTER_API_KEY=sk-or-v1-... \
-  -e OPENROUTER_MODEL=google/gemini-2.5-flash
-```
+---
 
-**Cursor / Claude Desktop / other clients** (`.cursor/mcp.json`, `claude_desktop_config.json`, etc.):
+#### Single provider — OpenRouter (cloud)
+
 ```json
 {
   "mcpServers": {
@@ -351,16 +406,12 @@ claude mcp add vidlizer /path/to/.venv/bin/vidlizer-mcp \
 }
 ```
 
-#### Ollama (local, no API key)
+> Free models (`:free` suffix) automatically fall back to the cheapest paid model if rate-limited — no extra config needed.
 
-**Claude Code:**
-```bash
-claude mcp add vidlizer /path/to/.venv/bin/vidlizer-mcp \
-  -e PROVIDER=ollama \
-  -e OLLAMA_MODEL=qwen2.5vl:7b
-```
+---
 
-**JSON config:**
+#### Single provider — Ollama (local, no API key)
+
 ```json
 {
   "mcpServers": {
@@ -377,18 +428,12 @@ claude mcp add vidlizer /path/to/.venv/bin/vidlizer-mcp \
 }
 ```
 
-#### LM Studio / vLLM (OpenAI-compatible)
+> `FALLBACK_MODEL` is optional — omitting it auto-detects installed models and tries them in preferred order.
 
-**Claude Code:**
-```bash
-claude mcp add vidlizer /path/to/.venv/bin/vidlizer-mcp \
-  -e PROVIDER=openai \
-  -e OPENAI_BASE_URL=http://localhost:1234/v1 \
-  -e OPENAI_API_KEY=lm-studio \
-  -e OPENAI_MODEL=qwen/qwen2.5-vl-7b-instruct
-```
+---
 
-**JSON config:**
+#### Single provider — LM Studio (OpenAI-compatible, port 1234)
+
 ```json
 {
   "mcpServers": {
@@ -406,7 +451,137 @@ claude mcp add vidlizer /path/to/.venv/bin/vidlizer-mcp \
 }
 ```
 
-> For vLLM use `"OPENAI_API_KEY": "not-needed"` and set `OPENAI_BASE_URL` to your vLLM server.
+---
+
+#### Single provider — oMLX (Apple Silicon, port 8000)
+
+```json
+{
+  "mcpServers": {
+    "vidlizer": {
+      "type": "stdio",
+      "command": "/absolute/path/to/.venv/bin/vidlizer-mcp",
+      "env": {
+        "PROVIDER": "openai",
+        "OPENAI_BASE_URL": "http://localhost:8000/v1",
+        "OPENAI_API_KEY": "not-needed",
+        "OPENAI_MODEL": "mlx-community/Qwen2.5-VL-7B-Instruct-8bit"
+      }
+    }
+  }
+}
+```
+
+---
+
+#### Cross-provider fallback — oMLX → OpenRouter
+
+Primary runs on local oMLX; if it fails, switches to OpenRouter cloud automatically.
+
+```json
+{
+  "mcpServers": {
+    "vidlizer": {
+      "type": "stdio",
+      "command": "/absolute/path/to/.venv/bin/vidlizer-mcp",
+      "env": {
+        "PROVIDER": "openai",
+        "OPENAI_BASE_URL": "http://localhost:8000/v1",
+        "OPENAI_API_KEY": "not-needed",
+        "OPENAI_MODEL": "mlx-community/Qwen2.5-VL-7B-Instruct-8bit",
+        "FALLBACK_PROVIDER": "openrouter",
+        "FALLBACK_MODEL": "google/gemini-2.5-flash",
+        "FALLBACK_API_KEY": "sk-or-v1-..."
+      }
+    }
+  }
+}
+```
+
+---
+
+#### Cross-provider fallback — oMLX → Ollama
+
+Both local; oMLX fails (model missing / server down) → Ollama takes over.
+
+```json
+{
+  "mcpServers": {
+    "vidlizer": {
+      "type": "stdio",
+      "command": "/absolute/path/to/.venv/bin/vidlizer-mcp",
+      "env": {
+        "PROVIDER": "openai",
+        "OPENAI_BASE_URL": "http://localhost:8000/v1",
+        "OPENAI_API_KEY": "not-needed",
+        "OPENAI_MODEL": "mlx-community/Qwen2.5-VL-7B-Instruct-8bit",
+        "FALLBACK_PROVIDER": "ollama",
+        "FALLBACK_MODEL": "qwen2.5vl:7b"
+      }
+    }
+  }
+}
+```
+
+> `FALLBACK_BASE_URL` defaults to `OLLAMA_HOST` (or `http://localhost:11434`) — only set it if Ollama is on a non-standard host.
+
+---
+
+#### Cross-provider fallback — Ollama → OpenRouter
+
+Local-first; cloud kicks in if no model is installed or inference fails.
+
+```json
+{
+  "mcpServers": {
+    "vidlizer": {
+      "type": "stdio",
+      "command": "/absolute/path/to/.venv/bin/vidlizer-mcp",
+      "env": {
+        "PROVIDER": "ollama",
+        "OLLAMA_HOST": "http://localhost:11434",
+        "OLLAMA_MODEL": "qwen2.5vl:7b",
+        "FALLBACK_PROVIDER": "openrouter",
+        "FALLBACK_MODEL": "google/gemini-2.5-flash",
+        "FALLBACK_API_KEY": "sk-or-v1-..."
+      }
+    }
+  }
+}
+```
+
+---
+
+#### Same-provider fallback — pin explicit fallback model
+
+When auto-detection isn't wanted; both models use the same provider.
+
+```json
+{
+  "mcpServers": {
+    "vidlizer": {
+      "type": "stdio",
+      "command": "/absolute/path/to/.venv/bin/vidlizer-mcp",
+      "env": {
+        "PROVIDER": "ollama",
+        "OLLAMA_MODEL": "qwen2.5vl:7b",
+        "FALLBACK_MODEL": "qwen2.5vl:3b"
+      }
+    }
+  }
+}
+```
+
+---
+
+**Fallback env var reference:**
+
+| Var | Purpose | Default |
+|---|---|---|
+| `FALLBACK_PROVIDER` | Provider for fallback (`ollama`/`openai`/`openrouter`) | same as `PROVIDER` |
+| `FALLBACK_MODEL` | Model ID for fallback | auto-detect (same provider) |
+| `FALLBACK_BASE_URL` | Base URL for fallback `openai`/`ollama` server | `OPENAI_BASE_URL` or `OLLAMA_HOST` |
+| `FALLBACK_API_KEY` | API key for fallback provider | `OPENAI_API_KEY` or `OPENROUTER_API_KEY` |
 
 ### Logs
 
@@ -425,10 +600,12 @@ tail -f ~/.cache/vidlizer/mcp.log
 | `get_step(id, step)` | single flow step | ~150 |
 | `get_steps(id, start, end)` | step range | scaled |
 | `get_phase(id, phase)` | all steps in named phase | scaled |
-| `search_analysis(id, query)` | steps matching text | only hits |
+| `search_analysis(id, query)` | steps matching text (`query` or `keyword`) | only hits |
 | `get_transcript(id, start_s, end_s)` | transcript slice | scaled |
 | `get_full_analysis(id)` | full flow + transcript | full |
 | `delete_analysis(id)` | confirmation | ~10 |
+| `get_usage_stats()` | per-model token + cost breakdown | ~50/model |
+| `clear_usage_stats()` | reset usage log | ~10 |
 
 ### Token-efficient workflow
 

@@ -387,7 +387,46 @@ def _main() -> int:
                    help="Output format: json (default), summary (plain text), markdown")
     p.add_argument("--provider", choices=["openrouter", "ollama", "openai"], default=None,
                    help="AI provider: openrouter (cloud), ollama (local), openai (LM Studio/vLLM/any OpenAI-compat)")
+    p.add_argument("--stats", action="store_true",
+                   help="Show token and cost usage statistics across all runs, then exit")
+    p.add_argument("--clear-stats", action="store_true", dest="clear_stats",
+                   help="Reset usage statistics (delete usage log), then exit")
     cli = p.parse_args()
+
+    if cli.stats:
+        from vidlizer.usage import get_stats
+        stats = get_stats()
+        _console.print(f"\n[bold]Usage statistics[/bold]  ([dim]{stats['log_path']}[/dim])\n")
+        _console.print(f"  Total runs:       [cyan]{stats['total_runs']}[/cyan]")
+        _console.print(f"  Total tokens in:  [cyan]{stats['total_tokens_in']:,}[/cyan]")
+        _console.print(f"  Total tokens out: [cyan]{stats['total_tokens_out']:,}[/cyan]")
+        cost = f"[bold green]~${stats['total_cost_usd']:.4f}[/bold green]" if stats['total_cost_usd'] else "[bold cyan]free[/bold cyan]"
+        _console.print(f"  Total cost:       {cost}")
+        _console.print(f"  Total steps:      [cyan]{stats['total_steps']:,}[/cyan]\n")
+        if stats["by_model"]:
+            from rich.table import Table
+            t = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
+            t.add_column("Model")
+            t.add_column("Provider")
+            t.add_column("Runs", justify="right")
+            t.add_column("Tokens in", justify="right")
+            t.add_column("Tokens out", justify="right")
+            t.add_column("Cost USD", justify="right")
+            for row in stats["by_model"]:
+                c = f"~${row['cost_usd']:.4f}" if row["cost_usd"] else "free"
+                t.add_row(
+                    row["model"], row["provider"], str(row["runs"]),
+                    f"{row['tokens_in']:,}", f"{row['tokens_out']:,}", c,
+                )
+            _console.print(t)
+        _console.print()
+        return 0
+
+    if cli.clear_stats:
+        from vidlizer.usage import clear_stats
+        n = clear_stats()
+        _console.print(f"[green]✓[/green] Usage log cleared ({n} records deleted)")
+        return 0
 
     if cli.provider:
         os.environ["PROVIDER"] = cli.provider

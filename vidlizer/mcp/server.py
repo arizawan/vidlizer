@@ -39,12 +39,46 @@ app = FastMCP(
         "Workflow: call analyze_video → get analysis_id → use get_summary/get_step/"
         "get_phase/search_analysis to pull specific parts without loading everything. "
         "Full data via get_full_analysis (use sparingly — can be large). "
+        "search_analysis accepts 'query' or 'keyword' parameter (both work). "
+        "Track token and cost usage: get_usage_stats() returns per-model breakdown "
+        "(runs, tokens in/out, cost USD). Reset with clear_usage_stats(). "
         "Tail logs: tail -f ~/.cache/vidlizer/mcp.log"
     ),
 )
 
 
 # ─── helpers ────────────────────────────────────────────────────────────────
+
+import re as _re
+
+_UNICODE_SPACES = _re.compile(
+    r"[   -​  　﻿]"
+)
+
+
+def _normalize_spaces(s: str) -> str:
+    return _UNICODE_SPACES.sub(" ", s)
+
+
+def _resolve_local_path(path: str) -> str:
+    """Return the real filesystem path for `path`, resolving Unicode space variants.
+
+    macOS uses U+202F (NARROW NO-BREAK SPACE) in time-formatted filenames
+    (e.g. "11-26-41 AM") while agents pass regular U+0020 spaces. This finds
+    the matching entry by normalizing all Unicode spaces before comparing.
+    """
+    p = Path(path)
+    if p.exists():
+        return path
+    parent = p.parent
+    if not parent.exists():
+        return path
+    target = _normalize_spaces(p.name).lower()
+    for entry in parent.iterdir():
+        if _normalize_spaces(entry.name).lower() == target:
+            return str(entry)
+    return path  # no match — return original so ffmpeg gives the real error
+
 
 def _resolve_model(provider: str, model: str) -> str:
     if model:
@@ -208,6 +242,8 @@ async def analyze_video(
         local_path = path
 
         from vidlizer.downloader import is_url
+        if not is_url(local_path):
+            local_path = _resolve_local_path(local_path)
         if is_url(path):
             from vidlizer.downloader import download
             _log("Downloading video from URL…")
@@ -273,6 +309,8 @@ async def analyze_video(
 
         rec = store.load(aid)
         result = {**_meta(rec), "cached": False, "progress_log": progress_log}  # type: ignore[arg-type]
+        result["model_used"] = data.get("model_used", _model)
+        result["provider_used"] = data.get("provider_used", _provider)
         result["next_steps"] = (
             f"Call get_summary('{aid}') for an overview, "
             f"get_phase('{aid}', '<phase>') for a section, "
@@ -370,7 +408,8 @@ def get_phase(analysis_id: str, phase: str, full: bool = False) -> list[dict]:
 @app.tool()
 def search_analysis(
     analysis_id: str,
-    query: str,
+    query: str | None = None,
+    keyword: str | None = None,
     fields: list[str] | None = None,
 ) -> list[dict]:
     """
@@ -378,15 +417,19 @@ def search_analysis(
 
     Args:
         analysis_id: ID from analyze_video
-        query: Text to search for
+        query: Text to search for (alias: keyword)
+        keyword: Alias for query
         fields: Fields to search. Default: scene, action, text_visible, speech, observations
     """
+    search_term = query or keyword
+    if not search_term:
+        return [{"error": "query or keyword is required"}]
     rec = store.load(analysis_id)
     if not rec:
         return [{"error": f"Analysis {analysis_id!r} not found"}]
     flow = rec["data"].get("flow", [])
     search_in = fields or ["scene", "action", "text_visible", "speech", "observations"]
-    q = query.lower()
+    q = search_term.lower()
     results = []
     for s in flow:
         for field in search_in:
@@ -457,6 +500,30 @@ def delete_analysis(analysis_id: str) -> dict:
     """
     ok = store.delete(analysis_id)
     return {"deleted": ok, "analysis_id": analysis_id}
+
+
+@app.tool()
+def get_usage_stats() -> dict:
+    """
+    Return token and cost usage statistics across all vidlizer runs.
+
+    Shows total runs, total cost, total tokens, and a per-model breakdown
+    sorted by number of uses. Covers both CLI and MCP runs.
+    """
+    from vidlizer.usage import get_stats
+    return get_stats()
+
+
+@app.tool()
+def clear_usage_stats() -> dict:
+    """
+    Delete the usage log (reset all counters to zero).
+
+    Use when you want to start fresh tracking — e.g., beginning of a new project.
+    """
+    from vidlizer.usage import clear_stats
+    deleted = clear_stats()
+    return {"cleared": True, "records_deleted": deleted}
 
 
 # ─── resources ──────────────────────────────────────────────────────────────

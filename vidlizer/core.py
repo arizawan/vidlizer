@@ -677,7 +677,11 @@ def parse_json(text: str | dict) -> dict:
         if text.startswith("json"):
             text = text[4:]
         text = text.rsplit("```", 1)[0]
-    return json.loads(text.strip())
+    parsed = json.loads(text.strip())
+    # Some models return the flow array directly instead of {"flow": [...]}
+    if isinstance(parsed, list):
+        return {"flow": parsed}
+    return parsed
 
 
 def _merge_transcript(flow: list[dict], segments: list[dict]) -> None:
@@ -823,7 +827,15 @@ def run(
 
     # Build fallback model sequence for local providers
     _fallback_models: list[str] = []
-    if _is_ollama and _installed:
+    _fallback_model_env = os.getenv("FALLBACK_MODEL", "").strip()
+    _fallback_provider_env = os.getenv("FALLBACK_PROVIDER", "").lower().strip()
+    _is_cross_provider_fallback = bool(_fallback_provider_env and _fallback_provider_env != _provider)
+    if _fallback_model_env and _fallback_model_env != model and not _is_cross_provider_fallback:
+        _fallback_models = [_fallback_model_env]
+        _info(f"[dim]fallback model (env): {_fallback_model_env}[/dim]")
+    elif _fallback_model_env and _is_cross_provider_fallback:
+        _info(f"[dim]fallback: {_fallback_model_env} via {_fallback_provider_env}[/dim]")
+    elif _is_ollama and _installed:
         from vidlizer.models import get_ollama_fallback_sequence
         _fallback_models = get_ollama_fallback_sequence(_installed, exclude=model)
         if _fallback_models:
@@ -927,15 +939,19 @@ def run(
             ))
             return 0
 
-        def _try_model(m: str, trk: CostTracker) -> tuple[dict | None, int]:
-            """Run up to 3 attempts. Returns (data, rc) where rc=-1 means exhausted."""
+        def _try_model_with(
+            m: str, trk: CostTracker,
+            key: str | None, ep: str | None, hdrs: dict | None,
+            is_olla: bool, is_oai: bool,
+        ) -> tuple[dict | None, int]:
+            """Run up to 3 attempts with explicit provider settings."""
             for attempt in range(1, 4):
                 try:
                     return call_openrouter(
-                        api_key, m, frames, timeout, v, batch_size, trk,
+                        key, m, frames, timeout, v, batch_size, trk,
                         is_image=is_image, timestamps=frame_timestamps,
-                        endpoint=_endpoint, req_headers=_req_headers, is_ollama=_is_ollama,
-                        no_stream_opts=_is_openai_compat, no_json_format=_is_openai_compat,
+                        endpoint=ep, req_headers=hdrs, is_ollama=is_olla,
+                        no_stream_opts=is_oai, no_json_format=is_oai,
                     ), 0
                 except CostCapExceeded as e:
                     _err(str(e))
@@ -952,20 +968,55 @@ def run(
                 except (json.JSONDecodeError, requests.RequestException) as e:
                     _err(f"[bold]{m}[/bold] failed: {e}")
                     return None, -1
-            return None, -1  # retries exhausted
+            return None, -1
+
+        def _try_model(m: str, trk: CostTracker) -> tuple[dict | None, int]:
+            return _try_model_with(m, trk, api_key, _endpoint, _req_headers, _is_ollama, _is_openai_compat)
 
         tracker = CostTracker(max_cost=max_cost)
         data, rc = _try_model(model, tracker)
 
         if data is None and rc == -1:
-            if _fallback_models:
-                # Local providers: try curated fallback sequence
+            if _is_cross_provider_fallback and _fallback_model_env:
+                # Cross-provider fallback: build separate provider settings
+                _fb_is_ollama = _fallback_provider_env == "ollama"
+                _fb_is_oai = _fallback_provider_env == "openai"
+                if _fb_is_ollama:
+                    _fb_host = os.getenv("FALLBACK_BASE_URL",
+                                         os.getenv("OLLAMA_HOST", "http://localhost:11434"))
+                    _fb_ep: str | None = f"{_fb_host}/api/chat"
+                    _fb_key: str | None = None
+                    _fb_hdrs: dict | None = None
+                elif _fb_is_oai:
+                    _fb_base = os.getenv("FALLBACK_BASE_URL",
+                                         os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1")).rstrip("/")
+                    _fb_ep = f"{_fb_base}/chat/completions"
+                    _fb_key = os.getenv("FALLBACK_API_KEY", os.getenv("OPENAI_API_KEY", "lm-studio"))
+                    _fb_hdrs = {"Authorization": f"Bearer {_fb_key}", "Content-Type": "application/json"}
+                else:  # openrouter
+                    _fb_ep = None
+                    _fb_key = os.getenv("FALLBACK_API_KEY", os.getenv("OPENROUTER_API_KEY", ""))
+                    _fb_hdrs = None
+                _warn(
+                    f"primary failed — fallback [bold]{_fallback_model_env}[/bold] "
+                    f"via [bold]{_fallback_provider_env}[/bold]"
+                )
+                data, rc = _try_model_with(
+                    _fallback_model_env, tracker,
+                    _fb_key, _fb_ep, _fb_hdrs, _fb_is_ollama, _fb_is_oai,
+                )
+                if data is not None:
+                    model = _fallback_model_env
+
+            elif _fallback_models:
+                # Same-provider fallback sequence
                 for _fb in _fallback_models:
                     _warn(f"trying fallback: [bold]{_fb}[/bold]")
                     data, rc = _try_model(_fb, tracker)
                     if data is not None:
                         model = _fb
                         break
+
             elif not _is_ollama and not _is_openai_compat:
                 # OpenRouter: free model → cheapest paid fallback
                 is_free = next((m["free"] for m in _live_models if m["id"] == model), model.endswith(":free"))
@@ -999,10 +1050,20 @@ def run(
                     _merge_transcript(data["flow"], segments)
                     _info(f"transcript: [bold]{len(segments)} segments[/bold]  (merged into flow steps)")
 
+    data["model_used"] = model
+    data["provider_used"] = _provider
+
     _cache.put(video, cache_params, data)
 
     from vidlizer.formatter import format_output
     output.write_text(format_output(data, output_format))
+
+    from vidlizer.usage import record_run
+    record_run(
+        model=model, provider=_provider,
+        tokens_in=tracker.prompt_tokens, tokens_out=tracker.completion_tokens,
+        cost_usd=tracker.cost_usd, source=str(video), steps=steps,
+    )
 
     _console.print()
     _show_result_preview(data)
