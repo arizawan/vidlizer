@@ -187,6 +187,122 @@ def _check_whisper() -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
+# Vision model detection + interactive setup
+# ---------------------------------------------------------------------------
+
+_VISION_HINTS = frozenset([
+    "vl", "vision", "llava", "minicpm-v", "visual", "clip",
+    "pixtral", "idefics", "cogvlm", "internvl", "phi-3-v",
+    "molmo", "qwen2.5vl", "qwen3vl", "gemma-3",
+])
+
+# Minimal vision models for each local provider
+_OLLAMA_MINIMAL   = "qwen2.5vl:3b"          # ~2.3 GB
+_LMSTUDIO_MINIMAL = "mlx-community/Qwen2.5-VL-3B-Instruct-8bit"
+_OMLX_MINIMAL     = "mlx-community/Qwen2.5-VL-3B-Instruct-8bit"
+
+_OL_PREFS = ["qwen2.5vl:7b", "qwen2.5vl:3b", "minicpm-v:8b", "llava-onevision:7b", "llava"]
+
+
+def _is_vision_model(mid: str) -> bool:
+    m = mid.lower()
+    return any(h in m for h in _VISION_HINTS)
+
+
+def _pick_best_vision(models: list[str], prefs: list[str]) -> str | None:
+    """Return preferred vision model, then any vision model, then None."""
+    for pref in prefs:
+        for m in models:
+            if m.lower().startswith(pref.split(":")[0].lower()):
+                return m
+    return next((m for m in models if _is_vision_model(m)), None)
+
+
+def _prompt_yn(msg: str, default: bool = False) -> bool:
+    hint = "[Y/n]" if default else "[y/N]"
+    try:
+        ans = input(f"\n  {msg} {hint} ").strip().lower()
+        if not ans:
+            return default
+        return ans in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        return False
+
+
+def _ollama_pull(model: str, host: str) -> bool:
+    """Pull model via ollama CLI. Streams output. Returns True on success."""
+    cmd = ["ollama", "pull", model]
+    env = {**os.environ, "OLLAMA_HOST": host}
+    console.print(f"  [cyan]↓ ollama pull {model}[/cyan]  [dim](this may take a while)[/dim]")
+    try:
+        proc = subprocess.run(cmd, env=env, timeout=900)
+        return proc.returncode == 0
+    except Exception as exc:
+        console.print(f"  [red]Pull failed: {exc}[/red]")
+        return False
+
+
+def _setup_provider(
+    prov_id: str,
+    models: list[str],
+    host: str,
+    base_url: str,
+) -> tuple[str, str, str, str] | None:
+    """Ensure provider has a vision model. Prompt download if missing.
+
+    Returns (prov_id, model, host, base_url) or None if provider should be skipped.
+    """
+    console.print()
+    console.print(Rule(f"[bold cyan]Setup: {prov_id}[/bold cyan]", style="dim"))
+
+    if prov_id == "openrouter":
+        # Cloud — model already selected, no local setup needed
+        console.print(f"  [green]✓[/green]  Cloud provider — no local setup required")
+        return prov_id, models[0] if models else "", host, base_url
+
+    vision = _pick_best_vision(models, _OL_PREFS)
+
+    if vision:
+        console.print(f"  [green]✓[/green]  Vision model ready: [bold]{vision}[/bold]")
+        return prov_id, vision, host, base_url
+
+    # No vision model found
+    n = len(models)
+    installed_txt = f"{n} model{'s' if n != 1 else ''} installed" if n else "no models installed"
+    console.print(f"  [yellow]⚠[/yellow]   {prov_id}: {installed_txt}, none are vision-capable")
+
+    if models:
+        console.print(f"       Installed: {', '.join(models[:4])}{'…' if len(models) > 4 else ''}")
+
+    if prov_id == "ollama":
+        if _prompt_yn(f"Download minimal vision model ({_OLLAMA_MINIMAL}, ~2.3 GB)?"):
+            ok = _ollama_pull(_OLLAMA_MINIMAL, host)
+            if ok:
+                console.print(f"  [green]✓[/green]  Downloaded [bold]{_OLLAMA_MINIMAL}[/bold]")
+                return prov_id, _OLLAMA_MINIMAL, host, base_url
+            else:
+                console.print(f"  [red]Download failed — skipping Ollama[/red]")
+                return None
+        else:
+            console.print("  [dim]Skipping Ollama.[/dim]")
+            return None
+
+    elif prov_id == "lmstudio":
+        console.print(f"  [dim]Cannot auto-download via LM Studio API.[/dim]")
+        console.print(f"  [dim]→ Open LM Studio and load: {_LMSTUDIO_MINIMAL}[/dim]")
+        console.print(f"  [dim]  Then rerun: make smoke --provider lmstudio[/dim]")
+        return None
+
+    elif prov_id == "omlx":
+        console.print(f"  [dim]Cannot auto-download for oMLX.[/dim]")
+        console.print(f"  [dim]→ Restart oMLX with:[/dim]")
+        console.print(f"  [dim]  python -m mlx_lm.server --model {_OMLX_MINIMAL}[/dim]")
+        return None
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Model unloading (best-effort — never fails the run)
 # ---------------------------------------------------------------------------
 
@@ -955,67 +1071,82 @@ def main() -> int:
         console.print("\n[red]ffmpeg required — cannot continue.[/red]")
         return 1
 
-    # ── Build provider list ───────────────────────────────────────────────────
-    # Each entry: (provider_id, model, host_for_unload, openai_base_url)
-    # provider_id: "ollama" | "lmstudio" | "omlx" | "openrouter"
-    # openai_base_url: set as OPENAI_BASE_URL env var when testing this provider
-    available: list[tuple[str, str, str, str]] = []
-
-    _OL_PREFS = ["qwen2.5vl:7b", "qwen2.5vl:3b", "minicpm-v:8b", "llava-onevision:7b", "llava"]
+    # ── Build candidate list (detection only, no model selection yet) ──────────
+    # Each entry: (provider_id, model_list, host, openai_base_url)
+    candidates: list[tuple[str, list[str], str, str]] = []
 
     if args.provider:
-        # Single-provider override
         prov = args.provider
         if prov == "ollama":
             if not ollama_ok:
                 console.print("[red]Ollama not reachable.[/red]")
                 return 1
-            mdl = args.model or next(
-                (m for pref in _OL_PREFS for m in ol_mdls if m.startswith(pref.split(":")[0])),
-                ol_mdls[0] if ol_mdls else "",
-            )
-            available = [("ollama", mdl, ol_host, "")]
+            mdls = [args.model] if args.model else ol_mdls
+            candidates = [("ollama", mdls, ol_host, "")]
         elif prov in ("lmstudio", "openai", "openai-compat"):
             if not lms_ok:
                 console.print("[red]LM Studio not reachable at localhost:1234.[/red]")
                 return 1
-            available = [("lmstudio", args.model or (lms_mdls[0] if lms_mdls else ""), lms_base, lms_base)]
+            mdls = [args.model] if args.model else lms_mdls
+            candidates = [("lmstudio", mdls, lms_base, lms_base)]
         elif prov == "omlx":
             if not omlx_ok:
                 console.print("[red]oMLX not reachable at localhost:8000.[/red]")
                 return 1
-            available = [("omlx", args.model or (omlx_mdls[0] if omlx_mdls else ""), "", omlx_base)]
+            mdls = [args.model] if args.model else omlx_mdls
+            candidates = [("omlx", mdls, "", omlx_base)]
         elif prov == "openrouter":
-            available = [("openrouter", args.model or or_model, "", "")]
+            candidates = [("openrouter", [args.model or or_model], "", "")]
         else:
             console.print(f"[red]Unknown provider: {prov}[/red]  (ollama | lmstudio | omlx | openrouter)")
             return 1
     else:
         # Auto-detect all, local first: Ollama → LM Studio → oMLX → OpenRouter
-        if ollama_ok and ol_mdls:
-            mdl = next(
-                (m for pref in _OL_PREFS for m in ol_mdls if m.startswith(pref.split(":")[0])),
-                ol_mdls[0],
-            )
-            available.append(("ollama", mdl, ol_host, ""))
-        if lms_ok and lms_mdls:
-            available.append(("lmstudio", lms_mdls[0], lms_base, lms_base))
-        if omlx_ok and omlx_mdls:
-            available.append(("omlx", omlx_mdls[0], "", omlx_base))
+        if ollama_ok:
+            candidates.append(("ollama", ol_mdls, ol_host, ""))
+        if lms_ok:
+            candidates.append(("lmstudio", lms_mdls, lms_base, lms_base))
+        if omlx_ok:
+            candidates.append(("omlx", omlx_mdls, "", omlx_base))
         if or_ok:
-            available.append(("openrouter", or_model, "", ""))
+            candidates.append(("openrouter", [or_model], "", ""))
 
-    if not available:
+    if not candidates:
         console.print(
-            "\n[red]No provider available.[/red]\n"
-            "  Start Ollama, LM Studio, or set OPENROUTER_API_KEY."
+            "\n[red]No provider detected.[/red]\n"
+            "  Start Ollama, LM Studio, oMLX, or set OPENROUTER_API_KEY."
         )
         return 1
 
-    console.print(f"\n  [bold]Providers to test:[/bold]")
+    # ── Setup phase: check for vision models, offer downloads ─────────────────
+    # Runs interactively, one provider at a time, before any tests start.
+    # Each entry: (provider_id, chosen_model, host, openai_base_url)
+    available: list[tuple[str, str, str, str]] = []
+
+    for prov_id, mdls, host, base_url in candidates:
+        if prov_id == "openrouter":
+            # Cloud provider — model already known, no local setup
+            model = mdls[0] if mdls else or_model
+            console.print()
+            console.print(Rule(f"[bold cyan]Setup: {prov_id}[/bold cyan]", style="dim"))
+            console.print(f"  [green]✓[/green]  Cloud provider — no local setup required  "
+                          f"[dim](model: {model})[/dim]")
+            available.append((prov_id, model, host, base_url))
+            continue
+
+        entry = _setup_provider(prov_id, mdls, host, base_url)
+        if entry:
+            available.append(entry)
+
+    if not available:
+        console.print("\n[red]No provider ready for testing.[/red]")
+        return 1
+
+    console.print()
+    console.print(f"  [bold]Providers ready:[/bold]")
     for prov_id, prov_model, _, prov_base in available:
         base_tag = f"  [dim]({prov_base})[/dim]" if prov_base else ""
-        console.print(f"    [magenta]{prov_id}[/magenta]  →  {prov_model}{base_tag}")
+        console.print(f"    [green]✓[/green]  [magenta]{prov_id}[/magenta]  →  {prov_model}{base_tag}")
 
     # ── Build assets ──────────────────────────────────────────────────────────
     with tempfile.TemporaryDirectory(prefix="vidlizer_smoke_") as tmp_str:
