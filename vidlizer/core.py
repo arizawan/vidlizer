@@ -165,6 +165,12 @@ def run(
     if concurrency > 1 and _is_local:
         _warn(f"concurrency={concurrency} ignored for local providers (serialized server-side) — using 1")
         concurrency = 1
+    if concurrency > 1 and (
+        model.endswith(":free") or
+        next((m.get("free", False) for m in _live_models if m["id"] == model), False)
+    ):
+        _warn("free model detected — forcing concurrency=1 to avoid rate limits")
+        concurrency = 1
     if concurrency > 1:
         _info(f"[dim]concurrency: [bold]{concurrency}[/bold] parallel chunks[/dim]")
 

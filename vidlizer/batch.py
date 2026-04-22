@@ -71,6 +71,12 @@ Return a JSON object with a `flow` array containing exactly one element:
 
 Output: Provide ONLY a valid JSON object with the `flow` array containing exactly one step. No prose, no code fences."""
 
+PROMPT_REPAIR = (
+    "The following is malformed JSON from a video analysis. "
+    "Return ONLY the corrected JSON object with a `flow` array. "
+    "No prose, no code fences, no explanations:\n\n{broken_text}"
+)
+
 
 def parse_json(text: str | dict) -> dict:
     if isinstance(text, dict):
@@ -189,6 +195,23 @@ def call_model(
                     endpoint=endpoint, req_headers=req_headers,
                     is_ollama=is_ollama, no_stream_opts=no_stream_opts)
 
+    def _repair_json(broken_text: str, chunk_label: str) -> dict:
+        """One retry: ask model to fix broken JSON. Raises JSONDecodeError on failure."""
+        _console.print(f"[yellow]⚠[/yellow]  {chunk_label} parse failed — asking model to repair")
+        repair_payload: dict = {
+            "model": model,
+            "messages": [{"role": "user", "content": PROMPT_REPAIR.format(broken_text=broken_text[:4000])}],
+            "temperature": 0.0,
+        }
+        if not is_ollama and not no_json_format:
+            repair_payload["response_format"] = {"type": "json_object"}
+        repair_body = post(api_key, model, repair_payload, timeout, verbose, tracker,
+                           label=f"{chunk_label}[repair]", n_frames=0,
+                           endpoint=endpoint, req_headers=req_headers,
+                           is_ollama=is_ollama, no_stream_opts=no_stream_opts)
+        repair_text = repair_body["choices"][0]["message"]["content"] or ""
+        return parse_json(repair_text)
+
     # ── Single request (no batching needed) ──────────────────────────────────
     if batch_size <= 0 or len(frames) <= batch_size:
         tracker.batches_total = 1
@@ -264,9 +287,12 @@ def call_model(
             raw_text = body["choices"][0]["message"]["content"] or ""
             try:
                 chunk_data = parse_json(raw_text)
-            except json.JSONDecodeError as e:
-                _console.print(f"[yellow]⚠[/yellow]  chunk {i+1} parse failed ({e}) — skipping")
-                continue
+            except json.JSONDecodeError:
+                try:
+                    chunk_data = _repair_json(raw_text, label)
+                except (json.JSONDecodeError, Exception) as repair_err:
+                    _console.print(f"[yellow]⚠[/yellow]  {label} repair failed ({repair_err}) — skipping")
+                    continue
             steps = chunk_data.get("flow", [])
             for j, step in enumerate(steps):
                 step["step"] = step_offset + j
@@ -317,9 +343,12 @@ def call_model(
         raw_text = body["choices"][0]["message"]["content"] or ""
         try:
             chunk_data = parse_json(raw_text)
-        except json.JSONDecodeError as e:
-            _console.print(f"[yellow]⚠[/yellow]  chunk {i+1} parse failed ({e}) — skipping")
-            continue
+        except json.JSONDecodeError:
+            try:
+                chunk_data = _repair_json(raw_text, label)
+            except (json.JSONDecodeError, Exception) as repair_err:
+                _console.print(f"[yellow]⚠[/yellow]  {label} repair failed ({repair_err}) — skipping")
+                continue
 
         steps = chunk_data.get("flow", [])
         for j, step in enumerate(steps):
