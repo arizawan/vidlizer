@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-103%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-106%20passing-brightgreen.svg)](#testing)
 
 ![demo](assets/demo.gif)
 
@@ -17,7 +17,7 @@
 
 vidlizer extracts frames with ffmpeg, sends them to a vision model, and writes a `flow` array describing every scene, action, and visible text. For videos with audio it automatically transcribes speech with Apple MLX Whisper and merges it into each step.
 
-Two provider modes: **local** via [Ollama](https://ollama.com) (no API key, no cost) or **cloud** via [OpenRouter](https://openrouter.ai).
+Three provider modes: **local** via [Ollama](https://ollama.com) (no API key, no cost), **OpenAI-compatible** servers (LM Studio, vLLM, LocalAI), or **cloud** via [OpenRouter](https://openrouter.ai).
 
 ```bash
 vidlizer demo.mp4
@@ -31,8 +31,8 @@ vidlizer document.pdf
 ## ✨ Features
 
 - **Any input** — local video, image (jpg/png/webp/…), PDF, or URL (YouTube, Loom, Vimeo, Twitter)
-- **Local inference** — run fully offline via Ollama (`--provider ollama`), no API key needed
-- **Cloud inference** — OpenRouter with 7 curated models, live pricing, free model auto-fallback
+- **3 providers** — Ollama (fully offline), OpenAI-compatible (LM Studio/vLLM), OpenRouter (cloud)
+- **Automatic fallback** — if a model fails, tries next best available model automatically
 - **3 output formats** — `--format json` (default), `summary` (plain text by phase), `markdown` (step-per-section doc)
 - **Auto transcript** — detects audio, transcribes with Apple MLX Whisper (Neural Engine), merges speech into each flow step
 - **Perceptual dedup** — removes near-duplicate frames before sending (saves tokens)
@@ -40,6 +40,7 @@ vidlizer document.pdf
 - **In-memory cache** — repeat runs on the same file skip the API call
 - **Cost guard** — aborts if spend exceeds `MAX_COST_USD` (default $1.00)
 - **Live progress** — Rich streaming indicator shows elapsed time and token count per batch
+- **MCP server** — use from Claude Code, Cursor, Claude Desktop; provider/model locked via env vars
 - **Auto-install** — missing `ffmpeg` is brew-installed; `mlx-whisper` is pip-installed on first audio video
 - **Mac-native** — file picker dialog, Apple MLX transcription, osascript integration
 
@@ -49,7 +50,8 @@ vidlizer document.pdf
 
 - macOS (Apple Silicon recommended for transcription speed)
 - Python 3.10+
-- **Local mode**: [Ollama](https://ollama.com) installed + a vision model pulled (8 GB+ RAM)
+- **Ollama mode**: [Ollama](https://ollama.com) installed + a vision model pulled (5 GB+ RAM)
+- **LM Studio mode**: [LM Studio](https://lmstudio.ai) 0.3.16+ with a vision model loaded
 - **Cloud mode**: An [OpenRouter API key](https://openrouter.ai/keys)
 
 `ffmpeg` is installed automatically via Homebrew on first run if missing.
@@ -66,14 +68,22 @@ pip install -e .
 cp env.sample .env        # configure provider + keys
 ```
 
-**Local mode** (no API key needed):
+**Ollama** (fully offline, no API key):
 
 ```bash
 # Install Ollama from https://ollama.com, then:
-ollama pull qwen2.5vl:3b   # ~3.2 GB, requires 8 GB+ RAM
+ollama pull qwen2.5vl:3b   # ~3.2 GB, requires 5 GB+ RAM (recommended)
+ollama pull qwen2.5vl:7b   # ~6.0 GB, requires 10 GB+ RAM (best quality)
 ```
 
-**Cloud mode**:
+**LM Studio** (GPU-accelerated local inference):
+
+```bash
+# In LM Studio: load a vision model (e.g. Qwen2.5-VL 7B), enable the local server
+# Set PROVIDER=openai and OPENAI_BASE_URL=http://localhost:1234/v1 in .env
+```
+
+**OpenRouter** (cloud):
 
 ```bash
 # Paste your OpenRouter key in .env:
@@ -85,10 +95,13 @@ ollama pull qwen2.5vl:3b   # ~3.2 GB, requires 8 GB+ RAM
 ## ⚡ Quick start
 
 ```bash
-# Local inference (Ollama, free, no API key)
+# Ollama — fully local, no API key
 vidlizer demo.mp4 --provider ollama --model qwen2.5vl:3b
 
-# Cloud inference (OpenRouter)
+# LM Studio (or any OpenAI-compat server)
+vidlizer demo.mp4 --provider openai --model qwen/qwen2.5-vl-7b-instruct
+
+# OpenRouter (cloud)
 vidlizer demo.mp4 --provider openrouter --model google/gemini-2.5-flash
 
 # Analyze a YouTube video
@@ -165,33 +178,56 @@ Default output path is `<normalized-name>.analysis.json` (or matching extension)
 
 ## 🤖 Models
 
-### Local (Ollama) — no API key, no cost
+All providers send **one frame per request** (batch_size=1) for maximum compatibility with context-limited models. Thinking-mode output (`<think>` tags) is stripped automatically.
 
-Requires 8 GB+ RAM. Install a model with `ollama pull <name>`:
+### Local — Ollama
+
+Fully offline, no API key. Install with `ollama pull <name>`:
 
 | Model | Disk | RAM | Notes |
 |---|---|---|---|
-| `qwen2.5vl:3b` | 3.2 GB | ~5 GB | **Recommended** — 125K ctx, strong JSON, multi-image |
-| `qwen2.5vl:7b` | 6.0 GB | ~9 GB | Best local quality, needs 10+ GB RAM |
+| `qwen2.5vl:3b` ★ | 3.2 GB | ~5 GB | **Recommended** — 128K ctx, strong JSON, multi-image |
+| `qwen2.5vl:7b` ★ | 6.0 GB | ~9 GB | Best Ollama quality — 128K ctx, needs 10+ GB RAM |
 | `minicpm-v:8b` | 5.5 GB | ~8 GB | Strong OCR + visual reasoning, 32K ctx |
+| `llava-onevision:7b` | 5.5 GB | ~8 GB | Strong multi-image + video frames, reliable JSON |
 
-Uses Ollama's native `/api/chat` endpoint with `format: json` for reliable structured output. One frame per request (per-frame batching is automatic).
+Fallback order (if configured model unavailable): `qwen2.5vl:7b` → `qwen2.5vl:3b` → `minicpm-v:8b` → `llava-onevision:7b` → `llava:13b` → `llava:7b`
 
-### Cloud (OpenRouter)
+Uses Ollama's native `/api/chat` with `format: json` for reliable structured output.
 
-Models fetched live with current pricing:
+### Local — LM Studio / vLLM / LocalAI (OpenAI-compatible)
 
-| Model | Pricing | Notes |
+GPU-accelerated inference via any OpenAI-compatible server. Set `PROVIDER=openai` and point `OPENAI_BASE_URL` at your server.
+
+| Model | VRAM | Notes |
 |---|---|---|
-| `google/gemini-2.5-flash` | ~$0.001/run | **Recommended** — fast, accurate |
-| `google/gemini-2.5-flash-lite` | cheaper | Slightly less accurate |
-| `google/gemini-2.5-pro` | expensive | Best quality |
-| `openai/gpt-4o-mini` | low | OpenAI budget option |
-| `openai/gpt-4o` | expensive | OpenAI flagship |
-| `nvidia/nemotron-nano-12b-v2-vl:free` | free ⚡ | Rate-limited, auto-batched |
-| `google/gemma-4-31b-it:free` | free ⚡ | Rate-limited, may be slow |
+| `qwen/qwen2.5-vl-7b-instruct` ★ | ~8 GB | **Recommended** — 128K ctx, reliable JSON, multi-image |
+| `qwen/qwen3-vl-8b` ★ | ~10 GB | Latest Qwen vision — thinking tags stripped automatically |
+| `qwen/qwen2.5-vl-3b-instruct` | ~5 GB | Lightweight — fast, 5–6 GB VRAM |
+| `google/gemma-4-e4b-it` | ~6 GB | Google MoE — LM Studio 0.3.16+ native support |
+| `google/gemma-4-9b-it` | ~10 GB | Stronger Gemma 4 — 128K ctx, better instruction following |
+| `zai-org/glm-4.6v-flash` | ~8 GB | ZhipuAI MoE — 128K ctx, strong JSON, low latency |
+| `openbmb/minicpm-v-4.5` | ~8 GB | 8B Qwen3-based — strong OCR, multi-image, vLLM ready |
 
-Free models auto-fallback to the cheapest paid model on failure.
+Model IDs are as shown in LM Studio's model browser or your vLLM config. LM Studio serves one model at a time (no fallback needed). vLLM with multiple models loaded uses the same fallback sequence.
+
+Fallback fragment order (vLLM): `qwen2.5-vl-7b` → `qwen2.5-vl-3b` → `qwen3-vl` → `gemma-4` → `glm-4` → `minicpm-v` → `llava-onevision` → `llava`
+
+### Cloud — OpenRouter
+
+Models fetched live with current pricing. Run `vidlizer --list-models` to see the live list.
+
+| Model | Input / 1M tokens | Notes |
+|---|---|---|
+| `google/gemini-2.5-flash` ★ | $0.15 | **Recommended** — 1M ctx, fast, accurate |
+| `google/gemini-2.5-flash-lite` | $0.075 | Cheaper — slightly less accurate |
+| `google/gemini-2.5-pro` | $1.25 | Best quality, higher cost |
+| `openai/gpt-4o` | $2.50 | OpenAI flagship |
+| `openai/gpt-4o-mini` | $0.15 | OpenAI budget option |
+| `nvidia/nemotron-nano-12b-v2-vl:free` | free ⚡ | Rate-limited (8K/req), 128K ctx |
+| `google/gemma-4-31b-it:free` | free ⚡ | Rate-limited, 128K ctx |
+
+Free models auto-fallback to the cheapest available paid model on failure.
 
 ---
 
@@ -220,8 +256,8 @@ positional:
 options:
   -o, --output PATH     Output path (default: <name>.analysis.json/.md/.txt)
   --format FORMAT       Output format: json (default), summary, markdown
-  --provider PROVIDER   ollama (local, default) or openrouter (cloud)
-  --model MODEL         Model slug — Ollama name or OpenRouter slug
+  --provider PROVIDER   ollama | openai | openrouter
+  --model MODEL         Model slug — Ollama name, OpenAI-compat ID, or OpenRouter slug
   --max-frames N        Max frames to send (default 60, hard cap 200)
   --start SECONDS       Analyze from this timestamp
   --end SECONDS         Analyze up to this timestamp
@@ -229,7 +265,7 @@ options:
   --min-interval SECS   Minimum seconds between frames (default 2)
   --fps FPS             Extract at fixed FPS instead of scene-change
   --scale PX            Frame width in pixels (default 512)
-  --batch-size N        Frames per API call (0 = auto; Ollama forces 1)
+  --batch-size N        Frames per API call (0 = auto, default 1 for all providers)
   --dedup-threshold N   Perceptual dedup Hamming distance (default 8, 0 = off)
   --no-transcript       Skip audio transcription
   --max-cost USD        Abort if spend exceeds this (default 1.00)
@@ -244,24 +280,29 @@ options:
 Copy `env.sample` to `.env`:
 
 ```bash
-# Provider: ollama (default, local) or openrouter (cloud)
+# Provider: ollama | openai | openrouter
 PROVIDER=ollama
 
-# Ollama (local)
+# ── Ollama (local, no API key) ──────────────────────────────────────────────
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=qwen2.5vl:3b
 
-# OpenRouter (cloud)
+# ── OpenAI-compatible (LM Studio, vLLM, LocalAI, real OpenAI) ───────────────
+OPENAI_BASE_URL=http://localhost:1234/v1   # LM Studio default
+OPENAI_API_KEY=lm-studio                  # use "not-needed" for vLLM
+OPENAI_MODEL=qwen/qwen2.5-vl-7b-instruct  # must match model ID in server
+
+# ── OpenRouter (cloud) ──────────────────────────────────────────────────────
 OPENROUTER_API_KEY=sk-or-v1-...
 OPENROUTER_MODEL=google/gemini-2.5-flash
 
-# Frame extraction
+# ── Frame extraction ────────────────────────────────────────────────────────
 SCENE_THRESHOLD=0.1     # lower = more frames
 MIN_INTERVAL=2          # seconds between forced frames
 MAX_FRAMES=60
 FRAME_WIDTH=512
 MAX_COST_USD=1.00
-BATCH_SIZE=0            # Ollama always uses 1 (one frame per request)
+BATCH_SIZE=0            # 0 = auto (defaults to 1 frame per request for all providers)
 REQUEST_TIMEOUT=600
 ```
 
@@ -269,7 +310,9 @@ REQUEST_TIMEOUT=600
 
 ## 🔌 MCP Server
 
-Use vidlizer from any MCP-compatible agent — Claude Code, Cursor, Gemini CLI, PI Code, Claude Desktop.
+Use vidlizer from any MCP-compatible agent — Claude Code, Cursor, Claude Desktop, Gemini CLI.
+
+**Model and provider are set via env vars and cannot be overridden by the AI agent.** This prevents agents from switching to unexpected or expensive models mid-session.
 
 ### Install
 
@@ -279,9 +322,11 @@ pip install -e ".[mcp]"   # adds mcp package + vidlizer-mcp entry point
 
 ### Configure
 
-Use the **absolute path** to the venv binary — no shell activation needed.
+Use the **absolute path** to the venv binary — no shell activation needed. Run `which vidlizer-mcp` inside the venv to get the path.
 
-**Claude Code** (adds to `~/.claude.json`):
+#### OpenRouter (cloud)
+
+**Claude Code:**
 ```bash
 claude mcp add vidlizer /path/to/.venv/bin/vidlizer-mcp \
   -e PROVIDER=openrouter \
@@ -289,7 +334,7 @@ claude mcp add vidlizer /path/to/.venv/bin/vidlizer-mcp \
   -e OPENROUTER_MODEL=google/gemini-2.5-flash
 ```
 
-**Other clients** (Cursor `.cursor/mcp.json`, Claude Desktop, Bolt, etc.):
+**Cursor / Claude Desktop / other clients** (`.cursor/mcp.json`, `claude_desktop_config.json`, etc.):
 ```json
 {
   "mcpServers": {
@@ -306,7 +351,16 @@ claude mcp add vidlizer /path/to/.venv/bin/vidlizer-mcp \
 }
 ```
 
-Local (Ollama, no API key):
+#### Ollama (local, no API key)
+
+**Claude Code:**
+```bash
+claude mcp add vidlizer /path/to/.venv/bin/vidlizer-mcp \
+  -e PROVIDER=ollama \
+  -e OLLAMA_MODEL=qwen2.5vl:7b
+```
+
+**JSON config:**
 ```json
 {
   "mcpServers": {
@@ -315,12 +369,44 @@ Local (Ollama, no API key):
       "command": "/absolute/path/to/.venv/bin/vidlizer-mcp",
       "env": {
         "PROVIDER": "ollama",
-        "OLLAMA_MODEL": "qwen2.5vl:3b"
+        "OLLAMA_HOST": "http://localhost:11434",
+        "OLLAMA_MODEL": "qwen2.5vl:7b"
       }
     }
   }
 }
 ```
+
+#### LM Studio / vLLM (OpenAI-compatible)
+
+**Claude Code:**
+```bash
+claude mcp add vidlizer /path/to/.venv/bin/vidlizer-mcp \
+  -e PROVIDER=openai \
+  -e OPENAI_BASE_URL=http://localhost:1234/v1 \
+  -e OPENAI_API_KEY=lm-studio \
+  -e OPENAI_MODEL=qwen/qwen2.5-vl-7b-instruct
+```
+
+**JSON config:**
+```json
+{
+  "mcpServers": {
+    "vidlizer": {
+      "type": "stdio",
+      "command": "/absolute/path/to/.venv/bin/vidlizer-mcp",
+      "env": {
+        "PROVIDER": "openai",
+        "OPENAI_BASE_URL": "http://localhost:1234/v1",
+        "OPENAI_API_KEY": "lm-studio",
+        "OPENAI_MODEL": "qwen/qwen2.5-vl-7b-instruct"
+      }
+    }
+  }
+}
+```
+
+> For vLLM use `"OPENAI_API_KEY": "not-needed"` and set `OPENAI_BASE_URL` to your vLLM server.
 
 ### Logs
 
@@ -374,7 +460,7 @@ agent: search_analysis("abc123", "error")
 
 ## 🧪 Testing
 
-Fully automated test suite — **103 unit + integration tests, 3 e2e tests**.
+Fully automated test suite — **106 unit + integration tests, 3 e2e tests**.
 
 ```bash
 make install-dev    # installs pytest, pytest-html, pytest-mock
