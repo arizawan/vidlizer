@@ -263,14 +263,19 @@ def _setup_provider(
     vision = _pick_best_vision(models, _OL_PREFS)
 
     if vision:
-        console.print(f"  [green]✓[/green]  Vision model ready: [bold]{vision}[/bold]")
+        # Model found — still ask. User may want to skip this provider or pick a different one.
+        console.print(f"  [green]✓[/green]  Vision model found: [bold]{vision}[/bold]")
+        if models and len(models) > 1:
+            console.print(f"       All models: {', '.join(models[:5])}{'…' if len(models) > 5 else ''}")
+        if not _prompt_yn(f"Test {prov_id} with {vision}?", default=True):
+            console.print(f"  [dim]Skipping {prov_id}.[/dim]")
+            return None
         return prov_id, vision, host, base_url
 
     # No vision model found
     n = len(models)
     installed_txt = f"{n} model{'s' if n != 1 else ''} installed" if n else "no models installed"
     console.print(f"  [yellow]⚠[/yellow]   {prov_id}: {installed_txt}, none are vision-capable")
-
     if models:
         console.print(f"       Installed: {', '.join(models[:4])}{'…' if len(models) > 4 else ''}")
 
@@ -288,15 +293,31 @@ def _setup_provider(
             return None
 
     elif prov_id == "lmstudio":
-        console.print(f"  [dim]Cannot auto-download via LM Studio API.[/dim]")
-        console.print(f"  [dim]→ Open LM Studio and load: {_LMSTUDIO_MINIMAL}[/dim]")
-        console.print(f"  [dim]  Then rerun: make smoke --provider lmstudio[/dim]")
+        console.print(f"  [dim]Load a vision model in LM Studio, then press Enter to retry.[/dim]")
+        console.print(f"  [dim]Suggested: {_LMSTUDIO_MINIMAL}[/dim]")
+        if _prompt_yn("Retry LM Studio model detection?", default=False):
+            _, _, new_mdls = _check_lmstudio()
+            new_vision = _pick_best_vision(new_mdls, _OL_PREFS)
+            if new_vision:
+                console.print(f"  [green]✓[/green]  Found: [bold]{new_vision}[/bold]")
+                return prov_id, new_vision, host, base_url
+            console.print("  [red]Still no vision model — skipping LM Studio.[/red]")
+        else:
+            console.print("  [dim]Skipping LM Studio.[/dim]")
         return None
 
     elif prov_id == "omlx":
-        console.print(f"  [dim]Cannot auto-download for oMLX.[/dim]")
-        console.print(f"  [dim]→ Restart oMLX with:[/dim]")
+        console.print(f"  [dim]Restart oMLX with a vision model, then press Enter to retry.[/dim]")
         console.print(f"  [dim]  python -m mlx_lm.server --model {_OMLX_MINIMAL}[/dim]")
+        if _prompt_yn("Retry oMLX model detection?", default=False):
+            _, _, new_mdls = _check_omlx()
+            new_vision = _pick_best_vision(new_mdls, _OL_PREFS)
+            if new_vision:
+                console.print(f"  [green]✓[/green]  Found: [bold]{new_vision}[/bold]")
+                return prov_id, new_vision, host, base_url
+            console.print("  [red]Still no vision model — skipping oMLX.[/red]")
+        else:
+            console.print("  [dim]Skipping oMLX.[/dim]")
         return None
 
     return None
