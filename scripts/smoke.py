@@ -122,18 +122,28 @@ def _check_ollama() -> tuple[bool, str, list[str]]:
         return False, os.getenv("OLLAMA_HOST", "http://localhost:11434"), []
 
 
-def _check_openai_compat() -> tuple[bool, str, list[str]]:
+def _probe_openai_compat(base: str, key: str = "local") -> tuple[bool, list[str]]:
     try:
         import requests
-        base = os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1").rstrip("/")
-        key = os.getenv("OPENAI_API_KEY", "lm-studio")
-        r = requests.get(f"{base}/models",
+        r = requests.get(f"{base.rstrip('/')}/models",
                          headers={"Authorization": f"Bearer {key}"}, timeout=3)
         r.raise_for_status()
         models = [m["id"] for m in r.json().get("data", [])]
-        return True, base, models
+        return True, models
     except Exception:
-        return False, os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1"), []
+        return False, []
+
+
+def _check_lmstudio() -> tuple[bool, str, list[str]]:
+    base = "http://localhost:1234/v1"
+    ok, mdls = _probe_openai_compat(base, os.getenv("OPENAI_API_KEY", "lm-studio"))
+    return ok, base, mdls
+
+
+def _check_omlx() -> tuple[bool, str, list[str]]:
+    base = "http://localhost:8000/v1"
+    ok, mdls = _probe_openai_compat(base, "local")
+    return ok, base, mdls
 
 
 def _check_openrouter() -> tuple[bool, str, str]:
@@ -193,9 +203,8 @@ def _unload_ollama(model: str, host: str) -> None:
         console.print(f"\n  [dim]↓ Ollama unload skipped ({exc})[/dim]")
 
 
-def _unload_openai_compat(model: str, base: str) -> None:
+def _unload_lmstudio(model: str, base: str) -> None:
     # LM Studio ≥0.3 supports /api/v0/models/unload
-    # oMLX and other compat servers may not — swallow all errors
     try:
         import requests
         root = base.removesuffix("/v1")
@@ -207,9 +216,14 @@ def _unload_openai_compat(model: str, base: str) -> None:
         if r.ok:
             console.print(f"\n  [dim]↓ LM Studio: unloaded [bold]{model}[/bold][/dim]")
         else:
-            console.print(f"\n  [dim]↓ OpenAI-compat unload not supported (HTTP {r.status_code})[/dim]")
+            console.print(f"\n  [dim]↓ LM Studio unload not supported (HTTP {r.status_code})[/dim]")
     except Exception:
-        console.print(f"\n  [dim]↓ OpenAI-compat unload not supported[/dim]")
+        console.print(f"\n  [dim]↓ LM Studio unload not supported[/dim]")
+
+
+def _unload_omlx(model: str) -> None:
+    # oMLX has no model unload API — the process keeps the model loaded
+    console.print(f"\n  [dim]↓ oMLX: no unload API — model stays in unified memory[/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -918,18 +932,21 @@ def main() -> int:
 
     # ── Detect environment ────────────────────────────────────────────────────
     _section("Environment")
-    ffmpeg_ok, ffmpeg_ver       = _check_ffmpeg()
-    ollama_ok, ol_host, ol_mdls = _check_ollama()
-    oai_ok, oai_base, oai_mdls  = _check_openai_compat()
-    or_ok, or_detail, or_model  = _check_openrouter()
-    whisper_ok, whisper_det     = _check_whisper()
+    ffmpeg_ok, ffmpeg_ver          = _check_ffmpeg()
+    ollama_ok, ol_host, ol_mdls    = _check_ollama()
+    lms_ok, lms_base, lms_mdls     = _check_lmstudio()
+    omlx_ok, omlx_base, omlx_mdls  = _check_omlx()
+    or_ok, or_detail, or_model     = _check_openrouter()
+    whisper_ok, whisper_det        = _check_whisper()
 
     _record("ffmpeg",        "pass" if ffmpeg_ok else "fail", ffmpeg_ver)
     _record("Ollama",        "pass" if ollama_ok else "skip",
             f"{ol_host}  [{', '.join(ol_mdls[:3])}{'…' if len(ol_mdls) > 3 else ''}]"
             if ollama_ok else f"{ol_host} (not reachable)")
-    _record("OpenAI-compat", "pass" if oai_ok else "skip",
-            f"{oai_base}  [{', '.join(oai_mdls[:2])}]" if oai_ok else f"{oai_base} (not reachable)")
+    _record("LM Studio",     "pass" if lms_ok else "skip",
+            f"{lms_base}  [{', '.join(lms_mdls[:2])}]" if lms_ok else f"{lms_base} (not reachable)")
+    _record("oMLX",          "pass" if omlx_ok else "skip",
+            f"{omlx_base}  [{', '.join(omlx_mdls[:2])}]" if omlx_ok else f"{omlx_base} (not reachable)")
     _record("OpenRouter",    "pass" if or_ok else "skip",
             f"{or_detail}" + (f"  → free model: {or_model}" if or_ok else ""))
     _record("mlx-whisper",   "pass" if whisper_ok else "skip", whisper_det)
@@ -939,8 +956,12 @@ def main() -> int:
         return 1
 
     # ── Build provider list ───────────────────────────────────────────────────
-    # Each entry: (provider_id, model, host_for_unload)
-    available: list[tuple[str, str, str]] = []
+    # Each entry: (provider_id, model, host_for_unload, openai_base_url)
+    # provider_id: "ollama" | "lmstudio" | "omlx" | "openrouter"
+    # openai_base_url: set as OPENAI_BASE_URL env var when testing this provider
+    available: list[tuple[str, str, str, str]] = []
+
+    _OL_PREFS = ["qwen2.5vl:7b", "qwen2.5vl:3b", "minicpm-v:8b", "llava-onevision:7b", "llava"]
 
     if args.provider:
         # Single-provider override
@@ -949,35 +970,40 @@ def main() -> int:
             if not ollama_ok:
                 console.print("[red]Ollama not reachable.[/red]")
                 return 1
-            prefs = ["qwen2.5vl:7b", "qwen2.5vl:3b", "minicpm-v:8b", "llava-onevision:7b", "llava"]
             mdl = args.model or next(
-                (m for pref in prefs for m in ol_mdls if m.startswith(pref.split(":")[0])),
+                (m for pref in _OL_PREFS for m in ol_mdls if m.startswith(pref.split(":")[0])),
                 ol_mdls[0] if ol_mdls else "",
             )
-            available = [("ollama", mdl, ol_host)]
-        elif prov in ("openai", "openai-compat"):
-            if not oai_ok:
-                console.print("[red]OpenAI-compat not reachable.[/red]")
+            available = [("ollama", mdl, ol_host, "")]
+        elif prov in ("lmstudio", "openai", "openai-compat"):
+            if not lms_ok:
+                console.print("[red]LM Studio not reachable at localhost:1234.[/red]")
                 return 1
-            available = [("openai", args.model or (oai_mdls[0] if oai_mdls else ""), oai_base)]
+            available = [("lmstudio", args.model or (lms_mdls[0] if lms_mdls else ""), lms_base, lms_base)]
+        elif prov == "omlx":
+            if not omlx_ok:
+                console.print("[red]oMLX not reachable at localhost:8000.[/red]")
+                return 1
+            available = [("omlx", args.model or (omlx_mdls[0] if omlx_mdls else ""), "", omlx_base)]
         elif prov == "openrouter":
-            available = [("openrouter", args.model or or_model, "")]
+            available = [("openrouter", args.model or or_model, "", "")]
         else:
-            console.print(f"[red]Unknown provider: {prov}[/red]")
+            console.print(f"[red]Unknown provider: {prov}[/red]  (ollama | lmstudio | omlx | openrouter)")
             return 1
     else:
-        # Auto-detect all, local first
+        # Auto-detect all, local first: Ollama → LM Studio → oMLX → OpenRouter
         if ollama_ok and ol_mdls:
-            prefs = ["qwen2.5vl:7b", "qwen2.5vl:3b", "minicpm-v:8b", "llava-onevision:7b", "llava"]
             mdl = next(
-                (m for pref in prefs for m in ol_mdls if m.startswith(pref.split(":")[0])),
+                (m for pref in _OL_PREFS for m in ol_mdls if m.startswith(pref.split(":")[0])),
                 ol_mdls[0],
             )
-            available.append(("ollama", mdl, ol_host))
-        if oai_ok and oai_mdls:
-            available.append(("openai", oai_mdls[0], oai_base))
+            available.append(("ollama", mdl, ol_host, ""))
+        if lms_ok and lms_mdls:
+            available.append(("lmstudio", lms_mdls[0], lms_base, lms_base))
+        if omlx_ok and omlx_mdls:
+            available.append(("omlx", omlx_mdls[0], "", omlx_base))
         if or_ok:
-            available.append(("openrouter", or_model, ""))
+            available.append(("openrouter", or_model, "", ""))
 
     if not available:
         console.print(
@@ -987,8 +1013,9 @@ def main() -> int:
         return 1
 
     console.print(f"\n  [bold]Providers to test:[/bold]")
-    for prov_id, prov_model, _ in available:
-        console.print(f"    [magenta]{prov_id}[/magenta]  →  {prov_model}")
+    for prov_id, prov_model, _, prov_base in available:
+        base_tag = f"  [dim]({prov_base})[/dim]" if prov_base else ""
+        console.print(f"    [magenta]{prov_id}[/magenta]  →  {prov_model}{base_tag}")
 
     # ── Build assets ──────────────────────────────────────────────────────────
     with tempfile.TemporaryDirectory(prefix="vidlizer_smoke_") as tmp_str:
@@ -1014,7 +1041,7 @@ def main() -> int:
         section_library(video, silent, image, pdf, tmp)
 
         # ── Per-provider sections ─────────────────────────────────────────────
-        for prov_id, prov_model, prov_host in available:
+        for prov_id, prov_model, prov_host, prov_base in available:
             console.print()
             console.print(Rule(
                 f"[bold magenta]Provider: {prov_id}  /  {prov_model}[/bold magenta]",
@@ -1025,15 +1052,32 @@ def main() -> int:
             prov_out = tmp / "out" / prov_id
             prov_out.mkdir(parents=True)
 
-            json_path = section_analysis(video, image, pdf, prov_out, prov_model, prov_id)
-            section_advanced(video, prov_out, prov_model, prov_id, json_path)
-            section_audio(video, silent, prov_out, prov_model, prov_id)
+            # For openai-compat providers, temporarily set OPENAI_BASE_URL
+            # so core.run() picks up the right server
+            _old_base = os.environ.get("OPENAI_BASE_URL")
+            if prov_base:
+                os.environ["OPENAI_BASE_URL"] = prov_base
+            # Map smoke provider IDs to core provider names
+            core_prov = "openai" if prov_id in ("lmstudio", "omlx") else prov_id
+
+            try:
+                json_path = section_analysis(video, image, pdf, prov_out, prov_model, core_prov)
+                section_advanced(video, prov_out, prov_model, core_prov, json_path)
+                section_audio(video, silent, prov_out, prov_model, core_prov)
+            finally:
+                if prov_base:
+                    if _old_base is not None:
+                        os.environ["OPENAI_BASE_URL"] = _old_base
+                    else:
+                        os.environ.pop("OPENAI_BASE_URL", None)
 
             # Unload local model from VRAM
             if prov_id == "ollama":
                 _unload_ollama(prov_model, prov_host)
-            elif prov_id == "openai":
-                _unload_openai_compat(prov_model, prov_host)
+            elif prov_id == "lmstudio":
+                _unload_lmstudio(prov_model, prov_host)
+            elif prov_id == "omlx":
+                _unload_omlx(prov_model)
 
     # ── Final table ───────────────────────────────────────────────────────────
     console.print()
@@ -1055,7 +1099,7 @@ def main() -> int:
 
     # Per-provider summary
     console.print()
-    for prov_id, prov_model, _ in [("library", "—", "")] + list(available):
+    for prov_id, prov_model, _, _base in [("library", "—", "", "")] + list(available):
         p, f, s = (
             sum(1 for c in _checks if c.provider == prov_id and c.status == "pass"),
             sum(1 for c in _checks if c.provider == prov_id and c.status == "fail"),
@@ -1069,7 +1113,7 @@ def main() -> int:
             f"  [dim]({prov_model})[/dim]"
         )
 
-    report = _save_html([(p, m) for p, m, _ in available])
+    report = _save_html([(p, m) for p, m, _, _b in available])
     console.print(f"\n[dim]Report → [/dim][cyan]{report}[/cyan]")
     console.print(f"[dim]Open   → [/dim][cyan]open {report}[/cyan]")
     return 1 if total_fail > 0 else 0
