@@ -686,12 +686,7 @@ def _cmd_mcp_setup() -> int:
         return 1
 
     # ── 2. Check mcp package is actually importable ────────────────────────────
-    venv_python = Path(mcp_bin).parent / "python"
     mcp_ok = importlib.util.find_spec("mcp") is not None
-    if not mcp_ok:
-        import subprocess as _sp
-        r = _sp.run([str(venv_python), "-c", "import mcp"], capture_output=True)
-        mcp_ok = r.returncode == 0
     if not mcp_ok:
         _console.print(f"[yellow]⚠[/yellow]  Binary found at [cyan]{mcp_bin}[/cyan] but [bold]mcp[/bold] package missing.\n")
         _console.print("  Fix:")
