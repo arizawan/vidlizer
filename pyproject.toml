@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vidlizer"
-version = "0.2.4"
-description = "Feed it any video, image, or PDF — get back a structured JSON timeline of everything that happened."
+version = "0.2.5"
+description = "Analyze any video, image, or PDF with a vision LLM — get structured JSON per scene. Local (Ollama/LM Studio) or cloud (OpenRouter). CLI + MCP server."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [{ name = "Rizawan Ahmed", email = "ahm.rizawan@gmail.com" }]
-keywords = ["video", "analysis", "ai", "vision", "json", "transcript", "openrouter", "llm"]
+keywords = ["video", "analysis", "ai", "vision", "json", "llm", "ollama", "openrouter", "mcp", "ffmpeg", "multimodal"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",

@@ -2,14 +2,14 @@
 
 # vidlizer
 
-**Feed it any video, image, or PDF — get back a structured JSON timeline of everything that happened.**
+**Point it at a video, image, or PDF. Get structured JSON — scene by scene.**
 
 [![PyPI](https://img.shields.io/pypi/v/vidlizer.svg)](https://pypi.org/project/vidlizer/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
 [![CI](https://github.com/arizawan/vidlizer/actions/workflows/ci.yml/badge.svg)](https://github.com/arizawan/vidlizer/actions)
-[![Tests](https://img.shields.io/badge/tests-220%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-248%20passing-brightgreen.svg)](#testing)
 
 ![demo](assets/demo.gif)
 
@@ -17,9 +17,9 @@
 
 ---
 
-vidlizer extracts frames with ffmpeg, sends them to a vision model, and writes a `flow` array describing every scene, action, and visible text. For videos with audio it automatically transcribes speech with Apple MLX Whisper and merges it into each step.
+vidlizer pulls frames out of any video, image, or PDF using ffmpeg, sends them to a vision LLM, and returns a `flow` array — one entry per scene. Each entry tells you what happened, who was on screen, what text was visible, and what changed. If the video has audio, it transcribes it with Apple MLX Whisper and merges the speech into each step.
 
-Four provider modes: **local** via [Ollama](https://ollama.com) (no API key, no cost), **LM Studio** (port 1234), **oMLX** (Apple Silicon native, port 8000), or **cloud** via [OpenRouter](https://openrouter.ai).
+Runs fully local via [Ollama](https://ollama.com) or any OpenAI-compatible server (LM Studio, vLLM, oMLX) — no API key, no data leaving your machine. Or connect [OpenRouter](https://openrouter.ai) for cloud models. `vidlizer setup` detects what you have installed and writes your config in under a minute.
 
 ```bash
 vidlizer demo.mp4
