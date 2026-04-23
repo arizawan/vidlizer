@@ -614,6 +614,149 @@ def _cmd_setup() -> int:
     return 0
 
 
+def _mcp_env_from_dotenv() -> dict[str, str]:
+    """Build MCP env block from currently loaded env vars."""
+    provider = os.getenv("PROVIDER", "")
+    env: dict[str, str] = {}
+    if provider == "ollama":
+        env = {
+            "PROVIDER": "ollama",
+            "OLLAMA_HOST": os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+            "OLLAMA_MODEL": os.getenv("OLLAMA_MODEL", "qwen2.5vl:3b"),
+        }
+    elif provider == "openai":
+        env = {
+            "PROVIDER": "openai",
+            "OPENAI_BASE_URL": os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1"),
+            "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", "lm-studio"),
+            "OPENAI_MODEL": os.getenv("OPENAI_MODEL", ""),
+        }
+    elif provider == "openrouter":
+        env = {
+            "PROVIDER": "openrouter",
+            "OPENROUTER_API_KEY": os.getenv("OPENROUTER_API_KEY", ""),
+            "OPENROUTER_MODEL": os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash"),
+        }
+    else:
+        env = {
+            "PROVIDER": "openrouter",
+            "OPENROUTER_API_KEY": "",
+            "OPENROUTER_MODEL": "google/gemini-2.5-flash",
+        }
+    for k in ("FALLBACK_PROVIDER", "FALLBACK_MODEL", "FALLBACK_API_KEY", "FALLBACK_BASE_URL"):
+        v = os.getenv(k, "")
+        if v:
+            env[k] = v
+    return env
+
+
+def _merge_mcp_config(config_path: Path, server_name: str, server_cfg: dict) -> None:
+    """Merge one mcpServers entry into existing config file (create if missing)."""
+    import json
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    existing: dict = {}
+    if config_path.exists():
+        try:
+            existing = json.loads(config_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+    existing.setdefault("mcpServers", {})[server_name] = server_cfg
+    config_path.write_text(json.dumps(existing, indent=2) + "\n")
+
+
+def _cmd_mcp_setup() -> int:
+    """Generate and optionally install the MCP server config for your editor."""
+    import importlib.util
+    import json
+    import shutil
+    from rich.syntax import Syntax
+
+    _load_dotenv()
+    _print_banner()
+    _console.print("[bold]MCP Setup[/bold]  [dim]— add vidlizer to your editor's MCP config[/dim]\n")
+
+    # ── 1. Locate vidlizer-mcp binary ─────────────────────────────────────────
+    mcp_bin = shutil.which("vidlizer-mcp")
+    if not mcp_bin:
+        _console.print("[red]✗[/red]  [bold]vidlizer-mcp[/bold] binary not found.\n")
+        _console.print("  Install with:")
+        _console.print('    [cyan]pipx install "vidlizer[mcp]"[/cyan]')
+        _console.print("  or, if already installed via pipx:")
+        _console.print("    [cyan]pipx inject vidlizer mcp[/cyan]")
+        return 1
+
+    # ── 2. Check mcp package is actually importable ────────────────────────────
+    venv_python = Path(mcp_bin).parent / "python"
+    mcp_ok = importlib.util.find_spec("mcp") is not None
+    if not mcp_ok:
+        import subprocess as _sp
+        r = _sp.run([str(venv_python), "-c", "import mcp"], capture_output=True)
+        mcp_ok = r.returncode == 0
+    if not mcp_ok:
+        _console.print(f"[yellow]⚠[/yellow]  Binary found at [cyan]{mcp_bin}[/cyan] but [bold]mcp[/bold] package missing.\n")
+        _console.print("  Fix:")
+        _console.print("    [cyan]pipx inject vidlizer mcp[/cyan]")
+        _console.print("  or:")
+        _console.print('    [cyan]pip install "vidlizer[mcp]"[/cyan]')
+        return 1
+
+    _console.print(f"[green]✓[/green]  [cyan]{mcp_bin}[/cyan]\n")
+
+    # ── 3. Build env block from current .env ──────────────────────────────────
+    env_block = _mcp_env_from_dotenv()
+    if not os.getenv("PROVIDER"):
+        _console.print("[yellow]⚠[/yellow]  No PROVIDER set. Run [bold]vidlizer setup[/bold] first.")
+        _console.print("  Using openrouter template — edit the config before use.\n")
+
+    # ── 4. Pick editor ────────────────────────────────────────────────────────
+    editors = [
+        ("claude-code",    "Claude Code"),
+        ("cursor",         "Cursor"),
+        ("claude-desktop", "Claude Desktop"),
+        ("windsurf",       "Windsurf"),
+        ("other",          "Other / generic JSON"),
+    ]
+    editor = _prompt_select("Select your editor", editors)
+
+    # ── 5. Build config JSON ──────────────────────────────────────────────────
+    server_cfg: dict = {"type": "stdio", "command": mcp_bin, "env": env_block}
+    full_cfg = {"mcpServers": {"vidlizer": server_cfg}}
+    config_json = json.dumps(full_cfg, indent=2)
+    server_json = json.dumps(server_cfg, indent=2)
+
+    # ── 6. Show generated config ──────────────────────────────────────────────
+    _console.print("\n[bold]Generated config (copy-paste ready):[/bold]\n")
+    _console.print(Syntax(config_json, "json", theme="monokai"))
+    _console.print()
+
+    # ── 7. Editor-specific instructions ──────────────────────────────────────
+    CONFIG_PATHS = {
+        "cursor":         Path.home() / ".cursor" / "mcp.json",
+        "claude-desktop": Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
+        "windsurf":       Path.home() / ".codeium" / "windsurf" / "mcp_config.json",
+    }
+
+    if editor == "claude-code":
+        _console.print("[bold]Option A — one command:[/bold]")
+        _console.print(f"\n  [cyan]claude mcp add-json vidlizer '{server_json}'[/cyan]")
+        _console.print("\n  Add [dim]--scope project[/dim] to configure per-project instead of globally.\n")
+        _console.print("[bold]Option B — paste JSON[/bold] into Claude Code → Settings → MCP Servers.\n")
+        return 0
+
+    if editor in CONFIG_PATHS:
+        cfg_path = CONFIG_PATHS[editor]
+        _console.print(f"  Config file: [cyan]{cfg_path}[/cyan]")
+        if _prompt_confirm(f"Write config to {cfg_path}?", default=True):
+            _merge_mcp_config(cfg_path, "vidlizer", server_cfg)
+            _console.print(f"\n[green]✓[/green]  Written. Restart [bold]{editor}[/bold] to load the server.\n")
+        else:
+            _console.print("\n  Paste the JSON above into your editor's MCP config manually.\n")
+    else:
+        _console.print("  Paste the JSON above into your editor's MCP server configuration.\n")
+
+    return 0
+
+
 def _cmd_doctor() -> int:
     """Read-only health check — shows provider and dependency status."""
     from vidlizer.detect import (
@@ -716,6 +859,8 @@ def _main() -> int:
         return _cmd_setup()
     if sys.argv[1:2] == ["doctor"]:
         return _cmd_doctor()
+    if sys.argv[1:2] == ["mcp-setup"]:
+        return _cmd_mcp_setup()
 
     _load_dotenv()
 

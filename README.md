@@ -423,14 +423,37 @@ Use vidlizer from any MCP-compatible agent — Claude Code, Cursor, Claude Deskt
 ### Install
 
 ```bash
-pip install -e ".[mcp]"   # adds mcp package + vidlizer-mcp entry point
+# pipx (recommended — isolated, globally available)
+pipx install "vidlizer[mcp]"
+
+# If vidlizer is already installed via pipx — inject mcp into the same venv
+pipx inject vidlizer mcp
+
+# pip / virtualenv
+pip install "vidlizer[mcp]"
 ```
 
-### Configure
+`vidlizer-mcp` is added to your PATH automatically. Verify with `which vidlizer-mcp`.
 
-Use the **absolute path** to the venv binary — no shell activation needed. Run `which vidlizer-mcp` inside the venv to get the path.
+> **Note on pipx**: `pipx install vidlizer` creates the `vidlizer-mcp` entry point but the `mcp` package is not installed. Run `pipx inject vidlizer mcp` to add it, or use `pipx install "vidlizer[mcp]"` upfront.
 
-All configs below use JSON format (works in Claude Code, Cursor, Claude Desktop, Gemini CLI). For `claude mcp add` CLI form, replace `"env": { "KEY": "val" }` with `-e KEY=val` flags.
+### One-command MCP setup
+
+```bash
+vidlizer mcp-setup
+```
+
+Interactive wizard — detects `vidlizer-mcp`, reads your `.env`, and either writes the config to your editor's config file or shows a one-liner to copy-paste. Supports Claude Code, Cursor, Claude Desktop, Windsurf.
+
+### Configure manually
+
+Use the **absolute path** to the binary — `which vidlizer-mcp` gives it. All configs below use JSON (works in Claude Code, Cursor, Claude Desktop, Gemini CLI).
+
+For Claude Code via CLI:
+```bash
+claude mcp add-json vidlizer '{"type":"stdio","command":"/path/to/vidlizer-mcp","env":{"PROVIDER":"openrouter","OPENROUTER_API_KEY":"sk-or-v1-...","OPENROUTER_MODEL":"google/gemini-2.5-flash"}}'
+# Add --scope project for per-project config instead of global
+```
 
 ---
 
