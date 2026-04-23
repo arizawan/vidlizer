@@ -955,6 +955,12 @@ subcommands (run before any file argument):
 
 Any omitted options will be asked interactively when running in a terminal.""",
     )
+    try:
+        import importlib.metadata as _meta
+        _ver = _meta.version("vidlizer")
+    except Exception:
+        _ver = "unknown"
+    p.add_argument("--version", action="version", version=f"vidlizer {_ver}")
     p.add_argument("video", nargs="?", type=str, help="Path to file or URL (YouTube, Loom, Vimeo, Twitter)")
     p.add_argument("-o", "--output", type=Path,
                    help="Output path (default: <name>.analysis.json/.md/.txt)")
