@@ -198,6 +198,7 @@ def test_doctor_exits_nonzero_when_env_missing(tmp_path):
     env = {k: v for k, v in os.environ.items()
            if k not in {"PROVIDER", "OPENROUTER_API_KEY", "OLLAMA_MODEL", "DOTENV_PATH"}}
     env["PYTHONPATH"] = project_root
+    env["VIDLIZER_CONFIG_DIR"] = str(tmp_path)  # empty dir, no .env
     r = subprocess.run(
         [sys.executable, "-m", "vidlizer.cli", "doctor"],
         capture_output=True, text=True, timeout=10,
@@ -226,15 +227,17 @@ def test_doctor_output_contains_expected_sections():
 # ---------------------------------------------------------------------------
 
 def test_setup_writes_env_file(tmp_path):
-    """setup detects OpenRouter via fake key, writes .env in cwd."""
+    """setup detects OpenRouter via fake key, writes .env to VIDLIZER_CONFIG_DIR."""
     # 3× Enter = skip port retries for offline local providers
-    # "1" + Enter = select OpenRouter as primary (only candidate)
-    piped = "\n\n\n1\n"
+    # "1" + Enter = select OR (detected candidate)
+    # Enter = keep current key, Enter = pick model 1 (gemini-2.5-flash)
+    piped = "\n\n\n1\n\n\n"
     project_root = str(Path(__file__).parent.parent)
     env = {
         **os.environ,
-        "OPENROUTER_API_KEY": "sk-test-fake",  # non-empty → OR detected
+        "OPENROUTER_API_KEY": "sk-test-fake",
         "PYTHONPATH": project_root,
+        "VIDLIZER_CONFIG_DIR": str(tmp_path),  # redirect config write
     }
     r = subprocess.run(
         [sys.executable, "-m", "vidlizer.cli", "setup"],

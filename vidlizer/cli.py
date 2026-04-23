@@ -20,6 +20,19 @@ from rich.text import Text
 
 _console = Console(stderr=True, highlight=False)
 
+def _config_env_path() -> Path:
+    """Canonical per-user config: ~/.config/vidlizer/.env (override via VIDLIZER_CONFIG_DIR)."""
+    d = os.getenv("VIDLIZER_CONFIG_DIR")
+    return (Path(d) if d else Path.home() / ".config" / "vidlizer") / ".env"
+
+
+def _load_dotenv() -> None:
+    """Load .env with precedence: system env > cwd/.env > ~/.config/vidlizer/.env"""
+    cwd_env = Path.cwd() / ".env"
+    cfg_env = _config_env_path()
+    load_dotenv(cwd_env, override=False)   # project override (highest after system env)
+    load_dotenv(cfg_env, override=False)   # user config fallback
+
 
 _CURATED_MODELS = [
     "google/gemini-2.5-flash",
@@ -250,7 +263,7 @@ def _pick_file_gui() -> Path | None:
 
 def interactive_args(video: Path | None, output_format: str = "json") -> dict:
     """Ask for any missing configuration interactively."""
-    load_dotenv()
+    _load_dotenv()
     interactive = _is_interactive()
     args: dict = {}
 
@@ -357,7 +370,7 @@ def _cmd_setup() -> int:
         check_ollama, check_lmstudio, check_omlx, check_openrouter,
         pick_best_vision, OL_PREFS, OLLAMA_MINIMAL,
     )
-    load_dotenv()
+    _load_dotenv()
     _print_banner()
     _console.print("[bold]Setup Wizard[/bold]  [dim]— configures your .env[/dim]\n")
 
@@ -397,26 +410,29 @@ def _cmd_setup() -> int:
         if port:
             omlx_ok, omlx_base, omlx_mdls = check_omlx(f"http://localhost:{port}/v1")
 
-    # Build candidate list
+    # Build candidate list — auto-detected + always-available manual options
+    # name, base_url, detected_model
     candidates: list[tuple[str, str, str]] = []
-    if ollama_ok:   candidates.append(("Ollama",     ol_host,   pick_best_vision(ol_mdls, OL_PREFS) or ""))
-    if lms_ok:      candidates.append(("LM Studio",  lms_base,  pick_best_vision(lms_mdls, OL_PREFS) or ""))
-    if omlx_ok:     candidates.append(("oMLX",       omlx_base, pick_best_vision(omlx_mdls, OL_PREFS) or ""))
-    if or_ok:       candidates.append(("OpenRouter",  "",        or_model))
-
-    if not candidates:
-        _console.print(
-            "\n[red]No provider detected.[/red]\n"
-            "  Start Ollama / LM Studio / oMLX, or add OPENROUTER_API_KEY to your shell.\n"
-        )
-        return 1
+    if ollama_ok:   candidates.append(("Ollama",              ol_host,   pick_best_vision(ol_mdls, OL_PREFS) or ""))
+    if lms_ok:      candidates.append(("LM Studio",           lms_base,  pick_best_vision(lms_mdls, OL_PREFS) or ""))
+    if omlx_ok:     candidates.append(("oMLX",                omlx_base, pick_best_vision(omlx_mdls, OL_PREFS) or ""))
+    if or_ok:       candidates.append(("OpenRouter",           "",        or_model))
+    # Manual options always available (even if not auto-detected)
+    if not or_ok:   candidates.append(("OpenRouter",           "",        ""))
+    candidates.append(    ("Custom OpenAI-compatible",  "",        ""))
 
     # Pick primary provider
-    _console.print("\n[bold]Detected providers:[/bold]")
+    _console.print("\n[bold]Available providers:[/bold]")
     for i, (name, url, model) in enumerate(candidates, 1):
         hint = f"  [dim]{url}[/dim]" if url else ""
-        model_hint = f"  → {model}" if model else "  → no vision model"
-        _console.print(f"  [bold]{i}[/bold].  [magenta]{name:<12}[/magenta]{hint}[dim]{model_hint}[/dim]")
+        if model:
+            model_hint = f"  → {model}"
+        elif name in ("OpenRouter", "Custom OpenAI-compatible"):
+            model_hint = "  [dim](will configure)[/dim]"
+        else:
+            model_hint = "  [yellow]→ no vision model[/yellow]"
+        detected = "  [green dim]detected[/green dim]" if url else ""
+        _console.print(f"  [bold]{i}[/bold].  [magenta]{name:<24}[/magenta]{hint}[dim]{model_hint}[/dim]{detected}")
 
     primary_idx = None
     while primary_idx is None:
@@ -445,33 +461,93 @@ def _cmd_setup() -> int:
             r = _sp.run(["ollama", "pull", OLLAMA_MINIMAL], env=env)
             primary_model = OLLAMA_MINIMAL if r.returncode == 0 else ""
 
-    # Pick fallback (optional)
+    # Custom OpenAI-compatible: prompt for URL, key, model
+    custom_openai_key = ""
+    if primary_name == "Custom OpenAI-compatible":
+        _console.print("\n  [bold]Custom OpenAI-compatible server[/bold]")
+        _console.print("  [dim]Supports: LM Studio, vLLM, LocalAI, Ollama /v1, real OpenAI, any compatible server[/dim]")
+        try:
+            primary_url = input("  Base URL (e.g. http://localhost:1234/v1): ").strip() or "http://localhost:1234/v1"
+            custom_openai_key = input("  API key (Enter for 'lm-studio'): ").strip() or "lm-studio"
+        except (EOFError, KeyboardInterrupt):
+            primary_url = "http://localhost:1234/v1"
+            custom_openai_key = "lm-studio"
+        # Try to detect models from the given URL
+        from vidlizer.detect import _probe_openai_compat
+        ok, mdls = _probe_openai_compat(primary_url, custom_openai_key)
+        if ok and mdls:
+            vision = pick_best_vision(mdls, OL_PREFS)
+            primary_model = vision or mdls[0]
+            _console.print(f"  [green]✓[/green]  Detected model: [magenta]{primary_model}[/magenta]")
+        else:
+            _console.print("  [yellow]Could not reach server — enter model name manually.[/yellow]")
+            try:
+                primary_model = input("  Model name: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                primary_model = ""
+
+    # OpenRouter: always prompt for key and model when selected
+    or_api_key = os.getenv("OPENROUTER_API_KEY", "")
+    or_model_choice = or_model  # detected free model, used as default
+    _or_involved = primary_name == "OpenRouter"
+
+    # Pick fallback (optional) — exclude primary from list
     remaining = [(i, c) for i, c in enumerate(candidates) if i != primary_idx]
     fallback: tuple[str, str, str] | None = None
     if remaining:
         _console.print("\n  Fallback provider (Enter to skip):")
         for n, (orig_i, (name, url, model)) in enumerate(remaining, 1):
             hint = f"  [dim]{url}[/dim]" if url else ""
-            _console.print(f"    [bold]{n}[/bold].  [magenta]{name:<12}[/magenta]{hint}")
+            _console.print(f"    [bold]{n}[/bold].  [magenta]{name:<24}[/magenta]{hint}")
         try:
             raw = input(f"  Fallback (1–{len(remaining)}, Enter to skip): ").strip()
             if raw.isdigit() and 1 <= int(raw) <= len(remaining):
                 fallback = remaining[int(raw) - 1][1]
+                if fallback[0] == "OpenRouter":
+                    _or_involved = True
         except (EOFError, KeyboardInterrupt):
             pass
 
-    # OpenRouter: prompt for API key if not set
-    or_api_key = os.getenv("OPENROUTER_API_KEY", "")
-    if primary_name == "OpenRouter" or (fallback and fallback[0] == "OpenRouter"):
-        if not or_api_key:
-            try:
-                or_api_key = input("  OpenRouter API key (sk-or-v1-…): ").strip()
-            except (EOFError, KeyboardInterrupt):
-                or_api_key = ""
+    # OpenRouter: always prompt for key + model when involved
+    if _or_involved:
+        _console.print("\n  [bold]OpenRouter configuration[/bold]")
+        key_hint = f" [dim](current: ...{or_api_key[-4:]})[/dim]" if or_api_key else ""
+        _console.print(f"  API key{key_hint}")
+        try:
+            raw = input("  sk-or-v1-… (Enter to keep current): ").strip()
+            if raw:
+                or_api_key = raw
+        except (EOFError, KeyboardInterrupt):
+            pass
+
+        _console.print("\n  Model (curated list — Enter for recommended):")
+        _OR_MODELS = [
+            ("google/gemini-2.5-flash",             "Recommended — fast, accurate, cheap"),
+            ("google/gemini-2.5-flash-lite",         "Cheaper, slightly less accurate"),
+            ("google/gemini-2.5-pro",                "Best quality, expensive"),
+            ("openai/gpt-4o-mini",                   "OpenAI budget option"),
+            ("nvidia/nemotron-nano-12b-v2-vl:free",  "Free — rate-limited"),
+            ("google/gemma-3-27b-it:free",           "Free — rate-limited"),
+            ("custom",                               "Enter model slug manually"),
+        ]
+        for n, (mid, note) in enumerate(_OR_MODELS, 1):
+            _console.print(f"    [bold]{n}[/bold].  {mid:<42}[dim]{note}[/dim]")
+        try:
+            raw = input(f"  Model (1–{len(_OR_MODELS)}, Enter=1): ").strip()
+            idx = (int(raw) - 1) if raw.isdigit() and 1 <= int(raw) <= len(_OR_MODELS) else 0
+            or_model_choice = _OR_MODELS[idx][0]
+            if or_model_choice == "custom":
+                or_model_choice = input("  Model slug: ").strip() or "google/gemini-2.5-flash"
+        except (EOFError, KeyboardInterrupt):
+            or_model_choice = "google/gemini-2.5-flash"
+
+        if primary_name == "OpenRouter":
+            primary_model = or_model_choice
 
     # ── Build .env values ────────────────────────────────────────────────────
     def _prov_key(name: str) -> str:
         return {"Ollama": "ollama", "LM Studio": "openai", "oMLX": "openai",
+                "Custom OpenAI-compatible": "openai",
                 "OpenRouter": "openrouter"}.get(name, "ollama")
 
     env_values: dict[str, str] = {
@@ -480,10 +556,10 @@ def _cmd_setup() -> int:
     if primary_name == "Ollama":
         env_values["OLLAMA_HOST"]  = primary_url or "http://localhost:11434"
         env_values["OLLAMA_MODEL"] = primary_model or OLLAMA_MINIMAL
-    elif primary_name in ("LM Studio", "oMLX"):
+    elif primary_name in ("LM Studio", "oMLX", "Custom OpenAI-compatible"):
         env_values["OPENAI_BASE_URL"] = primary_url or "http://localhost:1234/v1"
         env_values["OPENAI_MODEL"]    = primary_model or ""
-        env_values["OPENAI_API_KEY"]  = os.getenv("OPENAI_API_KEY", "lm-studio")
+        env_values["OPENAI_API_KEY"]  = custom_openai_key or os.getenv("OPENAI_API_KEY", "lm-studio")
     elif primary_name == "OpenRouter":
         env_values["OPENROUTER_API_KEY"] = or_api_key
         env_values["OPENROUTER_MODEL"]   = primary_model or "google/gemini-2.5-flash"
@@ -498,7 +574,8 @@ def _cmd_setup() -> int:
             env_values["FALLBACK_API_KEY"] = or_api_key
 
     # ── Write .env ────────────────────────────────────────────────────────────
-    env_path = Path.cwd() / ".env"
+    env_path = _config_env_path()
+    env_path.parent.mkdir(parents=True, exist_ok=True)
     # packaged install: env.sample lives inside the package directory
     # git clone: also check repo root as fallback
     env_sample = Path(__file__).parent / "env.sample"
@@ -541,7 +618,7 @@ def _cmd_doctor() -> int:
         check_ffmpeg, check_ollama, check_lmstudio, check_omlx,
         check_openrouter, check_whisper, pick_best_vision, OL_PREFS,
     )
-    load_dotenv()
+    _load_dotenv()
     _print_banner()
     _console.print("[bold]Doctor[/bold]  [dim]— system health check[/dim]\n")
 
@@ -564,8 +641,9 @@ def _cmd_doctor() -> int:
     ffmpeg_ok, ffmpeg_ver = check_ffmpeg()
     _row("ffmpeg", ffmpeg_ok, ffmpeg_ver if ffmpeg_ok else "not found — run: brew install ffmpeg")
 
-    # .env
-    env_path = Path.cwd() / ".env"
+    # .env — check cwd first (project override), then user config
+    cwd_env = Path.cwd() / ".env"
+    env_path = cwd_env if cwd_env.exists() else _config_env_path()
     _row(".env file", env_path.exists(),
          str(env_path) if env_path.exists() else "missing — run: vidlizer setup")
 
@@ -637,7 +715,7 @@ def _main() -> int:
     if sys.argv[1:2] == ["doctor"]:
         return _cmd_doctor()
 
-    load_dotenv()
+    _load_dotenv()
 
     import argparse
     p = argparse.ArgumentParser(
