@@ -10,6 +10,7 @@
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
 [![CI](https://github.com/arizawan/vidlizer/actions/workflows/ci.yml/badge.svg)](https://github.com/arizawan/vidlizer/actions)
 [![Tests](https://img.shields.io/badge/tests-248%20passing-brightgreen.svg)](#testing)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-☕-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/arizawan)
 
 ![demo](https://raw.githubusercontent.com/arizawan/vidlizer/main/assets/demo.gif)
 
@@ -720,6 +721,24 @@ make smoke                                  # auto-detect all providers
 make smoke ARGS="--provider ollama"         # force single provider
 make smoke ARGS="--provider openrouter"     # OpenRouter only (no local needed)
 ```
+
+---
+
+## 🤝 Contributing
+
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code style, and PR guidelines.
+
+- **Bug report**: [open an issue](https://github.com/arizawan/vidlizer/issues) — include provider, model, macOS version, full error
+- **Feature request**: open an issue describing the use case
+- **PR**: branch from `main`, add tests, `make test` passes, `ruff check vidlizer/` clean
+
+---
+
+## ❤️ Support
+
+vidlizer is free and open source. If it saves you time:
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%E2%98%95-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/arizawan)
 
 ---
 
