@@ -453,15 +453,46 @@ def _cmd_setup() -> int:
 
     primary_name, primary_url, primary_model = candidates[primary_idx]
 
-    # Ollama: offer pull if no vision model
-    if primary_name == "Ollama" and not primary_model:
-        _console.print("\n  [yellow]No vision model found.[/yellow]")
-        if _prompt_confirm(f"Download {OLLAMA_MINIMAL} (~3.2 GB)?", default=True):
-            import subprocess as _sp
-            env = {**os.environ, "OLLAMA_HOST": ol_host}
-            _console.print(f"  [cyan]↓ ollama pull {OLLAMA_MINIMAL}[/cyan]")
-            r = _sp.run(["ollama", "pull", OLLAMA_MINIMAL], env=env)
-            primary_model = OLLAMA_MINIMAL if r.returncode == 0 else ""
+    # ── Model selection for local providers ──────────────────────────────────
+    def _pick_model(models: list[str], prefs: list[str], label: str) -> str:
+        from vidlizer.detect import is_vision_model
+        best = pick_best_vision(models, prefs)
+        _console.print(f"\n  [bold]{label} models:[/bold]")
+        for i, m in enumerate(models, 1):
+            vtag = "  [green dim]vision[/green dim]" if is_vision_model(m) else ""
+            dtag = "  [cyan]← recommended[/cyan]" if m == best else ""
+            _console.print(f"    [bold]{i}[/bold].  {m}{vtag}{dtag}")
+        n_last = len(models) + 1
+        _console.print(f"    [bold]{n_last}[/bold].  [dim]Enter model name manually[/dim]")
+        default_idx = (models.index(best) + 1) if best and best in models else 1
+        try:
+            raw = input(f"  Model (1–{n_last}, Enter={default_idx}): ").strip()
+            if not raw:
+                return best or models[0]
+            n = int(raw)
+            if n == n_last:
+                return input("  Model name: ").strip()
+            if 1 <= n <= len(models):
+                return models[n - 1]
+            return best or models[0]
+        except (ValueError, EOFError, KeyboardInterrupt):
+            return best or models[0]
+
+    if primary_name == "Ollama":
+        if ol_mdls:
+            primary_model = _pick_model(ol_mdls, OL_PREFS, "Ollama")
+        elif not primary_model:
+            _console.print("\n  [yellow]No vision model found.[/yellow]")
+            if _prompt_confirm(f"Download {OLLAMA_MINIMAL} (~3.2 GB)?", default=True):
+                import subprocess as _sp
+                env = {**os.environ, "OLLAMA_HOST": ol_host}
+                _console.print(f"  [cyan]↓ ollama pull {OLLAMA_MINIMAL}[/cyan]")
+                r = _sp.run(["ollama", "pull", OLLAMA_MINIMAL], env=env)
+                primary_model = OLLAMA_MINIMAL if r.returncode == 0 else ""
+    elif primary_name == "LM Studio" and lms_mdls:
+        primary_model = _pick_model(lms_mdls, OL_PREFS, "LM Studio")
+    elif primary_name == "oMLX" and omlx_mdls:
+        primary_model = _pick_model(omlx_mdls, OL_PREFS, "oMLX")
 
     # Custom OpenAI-compatible: prompt for URL, key, model
     custom_openai_key = ""
@@ -478,9 +509,7 @@ def _cmd_setup() -> int:
         from vidlizer.detect import _probe_openai_compat
         ok, mdls = _probe_openai_compat(primary_url, custom_openai_key)
         if ok and mdls:
-            vision = pick_best_vision(mdls, OL_PREFS)
-            primary_model = vision or mdls[0]
-            _console.print(f"  [green]✓[/green]  Detected model: [magenta]{primary_model}[/magenta]")
+            primary_model = _pick_model(mdls, OL_PREFS, "Server")
         else:
             _console.print("  [yellow]Could not reach server — enter model name manually.[/yellow]")
             try:
