@@ -11,6 +11,8 @@
 [![CI](https://github.com/arizawan/vidlizer/actions/workflows/ci.yml/badge.svg)](https://github.com/arizawan/vidlizer/actions)
 [![Tests](https://img.shields.io/badge/tests-248%20passing-brightgreen.svg)](#testing)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-☕-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/arizawan)
+[![Author](https://img.shields.io/badge/author-arizawan.com-0A66C2?style=flat)](https://arizawan.com)
+[![Company](https://img.shields.io/badge/by-TheaTechSolutions-6E40C9?style=flat)](https://theatechsolutions.com)
 
 ![demo](https://raw.githubusercontent.com/arizawan/vidlizer/main/assets/demo.gif)
 

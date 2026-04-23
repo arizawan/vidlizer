@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vidlizer"
-version = "0.2.18"
-description = "Analyze any video, image, or PDF with a vision LLM — get structured JSON per scene. Local (Ollama/LM Studio) or cloud (OpenRouter). CLI + MCP server."
+version = "0.2.19"
+description = "Point it at a video, image, or PDF — get structured JSON. Runs local (Ollama, LM Studio, oMLX) or cloud (OpenRouter). CLI + MCP server for Claude Code, Cursor, and Claude Desktop."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [{ name = "Rizawan Ahmed", email = "ahm.rizawan@gmail.com" }]
-keywords = ["video", "analysis", "ai", "vision", "json", "llm", "ollama", "openrouter", "mcp", "ffmpeg", "multimodal"]
+keywords = ["video", "analysis", "ai", "vision", "json", "llm", "ollama", "openrouter", "mcp", "ffmpeg", "multimodal", "omlx", "lm-studio", "apple-silicon"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -49,6 +49,8 @@ Repository = "https://github.com/arizawan/vidlizer"
 "Bug Tracker" = "https://github.com/arizawan/vidlizer/issues"
 Changelog = "https://github.com/arizawan/vidlizer/releases"
 Funding = "https://buymeacoffee.com/arizawan"
+Author = "https://arizawan.com"
+Company = "https://theatechsolutions.com"
 
 [project.scripts]
 vidlizer = "vidlizer.cli:main"
