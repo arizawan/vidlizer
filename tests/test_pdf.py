@@ -1,7 +1,6 @@
 """Integration tests for PDF → frame conversion."""
 from __future__ import annotations
 
-import pytest
 
 from vidlizer.core import pdf_to_frames
 

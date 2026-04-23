@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import base64
 
-import pytest
 
 from vidlizer.frames import _IMAGE_EXTS, encode_frame
 

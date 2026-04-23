@@ -119,7 +119,6 @@ def test_call_model_single_chunk_step_count(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _make_frames(tmp_path, n: int) -> list:
-    from pathlib import Path
     frames = []
     for i in range(n):
         f = tmp_path / f"frame_{i:04d}.jpg"

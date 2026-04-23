@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 
 from vidlizer.formatter import format_output, to_json, to_markdown, to_summary
 

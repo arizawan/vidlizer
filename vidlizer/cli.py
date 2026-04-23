@@ -261,7 +261,7 @@ def _pick_file_gui() -> Path | None:
         return None
 
 
-def interactive_args(video: Path | None, output_format: str = "json") -> dict:
+def interactive_args(video: Path | None, output_format: str = "json", output: Path | None = None, skip_advanced: bool = False) -> dict:
     """Ask for any missing configuration interactively."""
     _load_dotenv()
     interactive = _is_interactive()
@@ -288,7 +288,9 @@ def interactive_args(video: Path | None, output_format: str = "json") -> dict:
     out_dir = Path.cwd() if str(video).startswith(_tf.gettempdir()) else video.parent
     _ext = ".analysis.md" if output_format == "markdown" else ".analysis.txt" if output_format == "summary" else ".analysis.json"
     default_output = out_dir / f"{safe_stem}{_ext}"
-    if interactive:
+    if output is not None:
+        args["output"] = output
+    elif interactive:
         out_raw = _prompt_str("Output path", str(default_output))
         args["output"] = Path(os.path.expanduser(out_raw))
     else:
@@ -332,7 +334,7 @@ def interactive_args(video: Path | None, output_format: str = "json") -> dict:
             args["model"] = "google/gemini-2.5-flash"
 
     # --- Advanced settings ---
-    if interactive:
+    if interactive and not skip_advanced:
         advanced = _prompt_confirm("Customize advanced settings?", default=False)
     else:
         advanced = False
@@ -824,8 +826,13 @@ def _main() -> int:
             _console.print()
 
     with url_ctx:
-        # Build args: interactive fills missing values
-        iargs = interactive_args(video_path, output_format=cli.output_format)
+        # Build args: interactive fills missing values (skip prompts for already-specified flags)
+        _has_advanced = any(v is not None for v in [
+            cli.scene, cli.min_interval, cli.fps, cli.scale, cli.max_frames,
+            cli.batch_size, cli.timeout, cli.max_cost, cli.start, cli.end,
+        ])
+        iargs = interactive_args(video_path, output_format=cli.output_format,
+                                 output=cli.output, skip_advanced=_has_advanced)
 
         # CLI flags override interactive answers
         if cli.output:                       iargs["output"] = cli.output

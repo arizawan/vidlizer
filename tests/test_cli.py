@@ -51,7 +51,8 @@ def test_output_path_cwd_for_url_input(tmp_path):
 
 def test_output_path_same_dir_for_local_file(tmp_path):
     local = tmp_path / "my video.mp4"
-    import re as _re, tempfile as _tf
+    import re as _re
+    import tempfile as _tf
     safe_stem = _re.sub(r"[^a-z0-9]+", "-", local.stem.lower()).strip("-") or "output"
     out_dir = Path.cwd() if str(local).startswith(_tf.gettempdir()) else local.parent
     result = out_dir / f"{safe_stem}.analysis.json"

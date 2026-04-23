@@ -45,12 +45,14 @@ def test_youtube_metadata(tmp_path):
 )
 def test_full_pipeline_youtube_url(tmp_path):
     out = tmp_path / "yt-result.json"
+    project_root = str(Path(__file__).parent.parent)
     r = subprocess.run(
         [sys.executable, "-m", "vidlizer.cli",
          _YT_URL, "-o", str(out), "--no-transcript",
          "--max-frames", "5", "--fps", "0.5"],
         capture_output=True, text=True, timeout=180,
-        env={**os.environ, "PROVIDER": "openrouter", "OPENROUTER_MODEL": "google/gemini-2.5-flash"},
+        env={**os.environ, "PYTHONPATH": project_root,
+             "PROVIDER": "openrouter", "OPENROUTER_MODEL": "google/gemini-2.5-flash"},
         cwd=str(tmp_path),
     )
     assert r.returncode == 0, f"stderr:\n{r.stderr[-3000:]}"

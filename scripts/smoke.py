@@ -29,10 +29,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from rich.console import Console
-from rich.panel import Panel
-from rich.rule import Rule
-from rich.table import Table
+from rich.console import Console  # noqa: E402
+from rich.panel import Panel      # noqa: E402
+from rich.rule import Rule        # noqa: E402
+from rich.table import Table      # noqa: E402
 
 console = Console(highlight=False)
 
@@ -97,7 +97,7 @@ def _record(
 # Environment detection (delegated to vidlizer.detect)
 # ---------------------------------------------------------------------------
 
-from vidlizer.detect import (
+from vidlizer.detect import (  # noqa: E402
     check_ffmpeg      as _check_ffmpeg,
     check_ollama      as _check_ollama,
     check_lmstudio    as _check_lmstudio,
@@ -239,7 +239,7 @@ def _setup_provider(
 
     if prov_id == "openrouter":
         # Cloud — model already selected, no local setup needed
-        console.print(f"  [green]✓[/green]  Cloud provider — no local setup required")
+        console.print("  [green]✓[/green]  Cloud provider — no local setup required")
         return prov_id, models[0] if models else "", host, base_url
 
     vision = _pick_best_vision(models, _OL_PREFS)
@@ -268,14 +268,14 @@ def _setup_provider(
                 console.print(f"  [green]✓[/green]  Downloaded [bold]{_OLLAMA_MINIMAL}[/bold]")
                 return prov_id, _OLLAMA_MINIMAL, host, base_url
             else:
-                console.print(f"  [red]Download failed — skipping Ollama[/red]")
+                console.print("  [red]Download failed — skipping Ollama[/red]")
                 return None
         else:
             console.print("  [dim]Skipping Ollama.[/dim]")
             return None
 
     elif prov_id == "lmstudio":
-        console.print(f"  [dim]Load a vision model in LM Studio, then press Enter to retry.[/dim]")
+        console.print("  [dim]Load a vision model in LM Studio, then press Enter to retry.[/dim]")
         console.print(f"  [dim]Suggested: {_LMSTUDIO_MINIMAL}[/dim]")
         if _prompt_yn("Retry LM Studio model detection?", default=False):
             _, _, new_mdls = _check_lmstudio()
@@ -289,7 +289,7 @@ def _setup_provider(
         return None
 
     elif prov_id == "omlx":
-        console.print(f"  [dim]Restart oMLX with a vision model, then press Enter to retry.[/dim]")
+        console.print("  [dim]Restart oMLX with a vision model, then press Enter to retry.[/dim]")
         console.print(f"  [dim]  python -m mlx_lm.server --model {_OMLX_MINIMAL}[/dim]")
         if _prompt_yn("Retry oMLX model detection?", default=False):
             _, _, new_mdls = _check_omlx()
@@ -337,12 +337,12 @@ def _unload_lmstudio(model: str, base: str) -> None:
         else:
             console.print(f"\n  [dim]↓ LM Studio unload not supported (HTTP {r.status_code})[/dim]")
     except Exception:
-        console.print(f"\n  [dim]↓ LM Studio unload not supported[/dim]")
+        console.print("\n  [dim]↓ LM Studio unload not supported[/dim]")
 
 
 def _unload_omlx(model: str) -> None:
     # oMLX has no model unload API — the process keeps the model loaded
-    console.print(f"\n  [dim]↓ oMLX: no unload API — model stays in unified memory[/dim]")
+    console.print("\n  [dim]↓ oMLX: no unload API — model stays in unified memory[/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +381,8 @@ def _make_pdf(path: Path, pages: int = 2) -> None:
         page = doc.new_page(width=595, height=842)
         page.draw_rect(page.rect, color=color, fill=color)
         page.insert_text((100, 420), f"Page {i + 1}", fontsize=24, color=(1, 1, 1))
-    doc.save(str(path)); doc.close()
+    doc.save(str(path))
+    doc.close()
 
 
 # ---------------------------------------------------------------------------
@@ -920,7 +921,7 @@ def _save_html(providers_tested: list[tuple[str, str]]) -> Path:
     total_pass  = sum(1 for c in _checks if c.status == "pass")
     total_fail  = sum(1 for c in _checks if c.status == "fail")
     total_skip  = sum(1 for c in _checks if c.status == "skip")
-    total       = len(_checks)
+    total       = len(_checks)  # noqa: F841
 
     scorecard = ""
     for prov_id, prov_model in [("library", "—")] + list(providers_tested):
@@ -1178,7 +1179,7 @@ def main() -> int:
         return 1
 
     console.print()
-    console.print(f"  [bold]Providers ready:[/bold]")
+    console.print("  [bold]Providers ready:[/bold]")
     for prov_id, prov_model, _, prov_base in available:
         base_tag = f"  [dim]({prov_base})[/dim]" if prov_base else ""
         console.print(f"    [green]✓[/green]  [magenta]{prov_id}[/magenta]  →  {prov_model}{base_tag}")
