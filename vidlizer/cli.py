@@ -956,37 +956,47 @@ subcommands (run before any file argument):
 Any omitted options will be asked interactively when running in a terminal.""",
     )
     p.add_argument("video", nargs="?", type=str, help="Path to file or URL (YouTube, Loom, Vimeo, Twitter)")
-    p.add_argument("-o", "--output", type=Path)
-    p.add_argument("-v", "--verbose", action="store_true")
-    p.add_argument("--model", default=None)
-    p.add_argument("--scene", type=float, default=None)
-    p.add_argument("--min-interval", type=float, default=None, dest="min_interval")
-    p.add_argument("--fps", type=float, default=None)
-    p.add_argument("--scale", type=int, default=None)
-    p.add_argument("--max-frames", type=int, default=None, dest="max_frames")
-    p.add_argument("--batch-size", type=int, default=None, dest="batch_size")
-    p.add_argument("--timeout", type=int, default=None)
+    p.add_argument("-o", "--output", type=Path,
+                   help="Output path (default: <name>.analysis.json/.md/.txt)")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="Debug output — show frames, prompts, raw model responses")
+    p.add_argument("--model", default=None,
+                   help="Model slug: Ollama name, OpenAI-compat ID, or OpenRouter slug")
+    p.add_argument("--scene", type=float, default=None,
+                   help="Scene-change sensitivity 0–1 (default 0.1 — lower = more frames)")
+    p.add_argument("--min-interval", type=float, default=None, dest="min_interval",
+                   help="Minimum seconds between forced frames (default 2)")
+    p.add_argument("--fps", type=float, default=None,
+                   help="Extract at fixed FPS instead of scene-change detection")
+    p.add_argument("--scale", type=int, default=None,
+                   help="Frame width in pixels (default 512)")
+    p.add_argument("--max-frames", type=int, default=None, dest="max_frames",
+                   help="Max frames to send to the model (default 60, hard cap 200)")
+    p.add_argument("--batch-size", type=int, default=None, dest="batch_size",
+                   help="Frames per API call (0 = auto, default 1 for all providers)")
+    p.add_argument("--timeout", type=int, default=None,
+                   help="Per-request timeout in seconds (default 600)")
     p.add_argument("--max-cost", type=float, default=None, dest="max_cost",
                    help="Abort mid-run if spend exceeds this many USD (default 1.00)")
     p.add_argument("--start", type=float, default=None,
-                   help="Analyze from this timestamp in seconds (analyze_moment)")
+                   help="Analyze from this timestamp in seconds")
     p.add_argument("--end", type=float, default=None,
-                   help="Analyze up to this timestamp in seconds (analyze_moment)")
+                   help="Analyze up to this timestamp in seconds")
     p.add_argument("--no-transcript", action="store_true", dest="no_transcript",
-                   help="Skip audio transcription even if faster-whisper is installed")
+                   help="Skip audio transcription (mlx-whisper)")
     p.add_argument("--dedup-threshold", type=int, default=None, dest="dedup_threshold",
-                   help="Perceptual dedup Hamming threshold (default 8, 0=off)")
+                   help="Perceptual dedup Hamming distance (default 8, 0 = off)")
     p.add_argument("--format", choices=["json", "summary", "markdown"], default="json",
                    dest="output_format", metavar="FORMAT",
                    help="Output format: json (default), summary (plain text), markdown")
     p.add_argument("--provider", choices=["openrouter", "ollama", "openai"], default=None,
-                   help="AI provider: openrouter (cloud), ollama (local), openai (LM Studio/vLLM/any OpenAI-compat)")
+                   help="AI provider: openrouter (cloud), ollama (local), openai (LM Studio/oMLX/vLLM)")
     p.add_argument("--concurrency", type=int, default=None,
-                   help="Parallel batch workers (default: 4 for OpenRouter, 1 for local providers)")
+                   help="Parallel batch workers (default: 4 for OpenRouter, 1 for local)")
     p.add_argument("--stats", action="store_true",
-                   help="Show token and cost usage statistics across all runs, then exit")
+                   help="Show token + cost usage stats by model, then exit")
     p.add_argument("--clear-stats", action="store_true", dest="clear_stats",
-                   help="Reset usage statistics (delete usage log), then exit")
+                   help="Reset usage log, then exit")
     cli = p.parse_args()
 
     if cli.stats:
