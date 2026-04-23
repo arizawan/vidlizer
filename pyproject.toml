@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vidlizer"
-version = "0.2.1"
+version = "0.2.2"
 description = "Feed it any video, image, or PDF — get back a structured JSON timeline of everything that happened."
 readme = "README.md"
 license = { text = "MIT" }

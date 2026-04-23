@@ -19,7 +19,7 @@ def pytest_configure(config) -> None:
     config.addinivalue_line("markers", "e2e: end-to-end tests requiring real network / API key")
     if hasattr(config, "_metadata"):
         config._metadata["Project"] = "vidlizer"
-        config._metadata["Version"] = "0.2.1"
+        config._metadata["Version"] = "0.2.2"
         config._metadata["Docs"] = "https://github.com/arizawan/vidlizer"
 
 
