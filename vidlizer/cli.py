@@ -946,7 +946,14 @@ def _main() -> int:
     p = argparse.ArgumentParser(
         description="vidlizer — analyze video/image/PDF → JSON user-journey map.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Any omitted options will be asked interactively when running in a terminal.",
+        epilog="""\
+subcommands (run before any file argument):
+  vidlizer setup              interactive setup wizard — detects providers, writes .env
+  vidlizer doctor             health check: ffmpeg, .env, providers, mlx-whisper
+  vidlizer doctor --fix       auto-install missing components (ffmpeg, Ollama, etc.)
+  vidlizer mcp-setup          generate MCP config for Claude Code / Cursor / Claude Desktop
+
+Any omitted options will be asked interactively when running in a terminal.""",
     )
     p.add_argument("video", nargs="?", type=str, help="Path to file or URL (YouTube, Loom, Vimeo, Twitter)")
     p.add_argument("-o", "--output", type=Path)

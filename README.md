@@ -48,6 +48,8 @@ vidlizer document.pdf
 - **Live progress** — Rich streaming indicator shows elapsed time and token count per batch
 - **MCP server** — use from Claude Code, Cursor, Claude Desktop; provider/model locked via env vars; result includes `model_used` + `provider_used`
 - **Auto-install** — missing `ffmpeg` is brew-installed; `mlx-whisper` bundled in default install (macOS)
+- **`doctor --fix`** — interactive repair wizard: installs missing ffmpeg/Ollama/LM Studio via Homebrew, re-runs `vidlizer setup` for `.env`, upgrades mlx-whisper
+- **`mcp-setup`** — one-command MCP config wizard: detects `vidlizer-mcp`, reads `.env`, writes editor config or shows a `claude mcp add-json` one-liner
 - **Mac-native** — file picker dialog, Apple MLX transcription, handles macOS Unicode filenames (e.g. "11:26 AM")
 
 ---
@@ -109,7 +111,8 @@ $ vidlizer setup
 ### Health check
 
 ```bash
-vidlizer doctor   # shows ffmpeg, .env, provider, model status
+vidlizer doctor          # shows ffmpeg, .env, provider, mlx-whisper status
+vidlizer doctor --fix    # interactive repair: brew-installs ffmpeg/Ollama/LM Studio, re-runs setup
 ```
 
 ### Manual provider setup
@@ -305,6 +308,17 @@ To opt out: `--no-transcript`
 ---
 
 ## 🛠️ CLI reference
+
+### Subcommands
+
+```bash
+vidlizer setup              # interactive wizard: detects providers, writes .env
+vidlizer doctor             # health check: ffmpeg, .env, providers, mlx-whisper
+vidlizer doctor --fix       # auto-repair: brew-installs missing deps, re-runs setup
+vidlizer mcp-setup          # generate MCP config for Claude Code / Cursor / Claude Desktop
+```
+
+### Analysis options
 
 ```
 vidlizer [video] [options]
@@ -706,7 +720,7 @@ agent: search_analysis("abc123", "error")
 
 ## 🧪 Testing
 
-Fully automated test suite — **223 unit + integration tests, 3 e2e tests**.
+Fully automated test suite — **248 unit + integration tests, 3 e2e tests**.
 
 ```bash
 make install-dev    # installs pytest, pytest-html, pytest-mock
