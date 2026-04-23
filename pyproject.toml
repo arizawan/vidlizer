@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vidlizer"
-version = "0.2.9"
+version = "0.2.10"
 description = "Analyze any video, image, or PDF with a vision LLM — get structured JSON per scene. Local (Ollama/LM Studio) or cloud (OpenRouter). CLI + MCP server."
 readme = "README.md"
 license = { text = "MIT" }
