@@ -81,9 +81,10 @@ def test_missing_api_key_fails(test_video, tmp_path):
     env.pop("OPENROUTER_MODEL", None)
     r = subprocess.run(
         [sys.executable, "-m", "vidlizer.cli", str(test_video),
-         "-o", str(tmp_path / "out.json"), "--model", "google/gemini-2.5-flash"],
+         "-o", str(tmp_path / "out.json"),
+         "--provider", "openrouter", "--model", "google/gemini-2.5-flash"],
         capture_output=True, text=True, timeout=30,
-        env={**env, "OPENROUTER_API_KEY": ""},
+        env={**env, "OPENROUTER_API_KEY": "", "PROVIDER": "openrouter"},
     )
     assert r.returncode != 0
 
