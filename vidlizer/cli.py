@@ -528,6 +528,7 @@ def _cmd_setup() -> int:
             return 0
 
     env_path.write_text(env_content)
+    env_path.chmod(0o600)  # secrets: owner-read only
     _console.print(f"\n[green]✓[/green]  .env written → [cyan]{env_path}[/cyan]")
     _console.print("\n[dim]Run [bold]vidlizer doctor[/bold] to verify your setup.[/dim]")
     _console.print("[dim]Run [bold]vidlizer video.mp4[/bold] to analyze a file.[/dim]\n")

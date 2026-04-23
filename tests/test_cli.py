@@ -194,8 +194,10 @@ def test_cli_start_end_flags(test_video, tmp_path, mock_openrouter_server):
 
 def test_doctor_exits_nonzero_when_env_missing(tmp_path):
     """doctor returns exit code 1 when no .env exists."""
+    project_root = str(Path(__file__).parent.parent)
     env = {k: v for k, v in os.environ.items()
            if k not in {"PROVIDER", "OPENROUTER_API_KEY", "OLLAMA_MODEL", "DOTENV_PATH"}}
+    env["PYTHONPATH"] = project_root
     r = subprocess.run(
         [sys.executable, "-m", "vidlizer.cli", "doctor"],
         capture_output=True, text=True, timeout=10,
@@ -207,9 +209,12 @@ def test_doctor_exits_nonzero_when_env_missing(tmp_path):
 
 def test_doctor_output_contains_expected_sections():
     """doctor prints ffmpeg and provider check headers."""
+    project_root = str(Path(__file__).parent.parent)
+    env = {**os.environ, "PYTHONPATH": project_root}
     r = subprocess.run(
         [sys.executable, "-m", "vidlizer.cli", "doctor"],
         capture_output=True, text=True, timeout=10,
+        env=env,
     )
     combined = r.stdout + r.stderr
     assert "ffmpeg" in combined.lower()
@@ -225,9 +230,11 @@ def test_setup_writes_env_file(tmp_path):
     # 3× Enter = skip port retries for offline local providers
     # "1" + Enter = select OpenRouter as primary (only candidate)
     piped = "\n\n\n1\n"
+    project_root = str(Path(__file__).parent.parent)
     env = {
         **os.environ,
         "OPENROUTER_API_KEY": "sk-test-fake",  # non-empty → OR detected
+        "PYTHONPATH": project_root,
     }
     r = subprocess.run(
         [sys.executable, "-m", "vidlizer.cli", "setup"],

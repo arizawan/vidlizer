@@ -241,10 +241,16 @@ async def analyze_video(
         url_ctx: contextlib.AbstractContextManager = contextlib.nullcontext(None)
         local_path = path
 
-        from vidlizer.downloader import is_url
+        from vidlizer.downloader import is_supported, is_url
         if not is_url(local_path):
             local_path = _resolve_local_path(local_path)
         if is_url(path):
+            if not is_supported(path):
+                return {
+                    "error": "Unsupported URL. Allowed: YouTube, Vimeo, Loom, Twitter/X",
+                    "analysis_id": None,
+                    "progress_log": progress_log,
+                }
             from vidlizer.downloader import download
             _log("Downloading video from URL…")
             await ctx.report_progress(10, 100)
