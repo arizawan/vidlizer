@@ -757,7 +757,68 @@ def _cmd_mcp_setup() -> int:
     return 0
 
 
-def _cmd_doctor() -> int:
+def _run_doctor_fix(*, ffmpeg_ok: bool, ollama_ok: bool, lms_ok: bool,
+                    omlx_ok: bool, env_ok: bool, whisper_ok: bool) -> None:
+    """Interactive fix wizard — called by doctor --fix."""
+    import shutil as _shutil
+    from vidlizer.bootstrap import _brew_install
+
+    _console.print("\n[bold]Fix mode[/bold]  [dim]— install missing components[/dim]\n")
+
+    brew = _shutil.which("brew")
+    if not brew:
+        _console.print("[yellow]Homebrew not found.[/yellow]  Install from [bold]https://brew.sh[/bold]:")
+        _console.print('  [cyan]/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"[/cyan]\n')
+        if not _prompt_confirm("Continue fixing non-brew items anyway?", default=True):
+            return
+
+    if not ffmpeg_ok:
+        if brew and _prompt_confirm("Install ffmpeg via Homebrew?", default=True):
+            _brew_install("ffmpeg", _console)
+        elif not brew:
+            _console.print("  [dim]ffmpeg: needs Homebrew — install brew first[/dim]")
+
+    if not ollama_ok:
+        ollama_bin = _shutil.which("ollama")
+        if ollama_bin:
+            _console.print("  Ollama installed but not running.")
+            if _prompt_confirm("Start Ollama (brew services start ollama)?", default=True):
+                subprocess.run(["brew", "services", "start", "ollama"] if brew
+                               else ["ollama", "serve"], check=False)
+        elif brew and _prompt_confirm("Install Ollama via Homebrew?", default=True):
+            ok = _brew_install("ollama", _console)
+            if ok:
+                subprocess.run(["brew", "services", "start", "ollama"], check=False)
+                _console.print("  [dim]Ollama starting in background…[/dim]")
+                if _prompt_confirm("Pull vision model qwen2.5vl:3b (~3.2 GB)?", default=True):
+                    subprocess.run(["ollama", "pull", "qwen2.5vl:3b"])
+        elif not brew:
+            _console.print("  [dim]Ollama: install from [bold]https://ollama.com[/bold][/dim]")
+
+    if not lms_ok:
+        if brew and _prompt_confirm("Install LM Studio via Homebrew Cask?", default=False):
+            subprocess.run(["brew", "install", "--cask", "lm-studio"])
+        else:
+            _console.print("  [dim]LM Studio: download from [bold]https://lmstudio.ai[/bold][/dim]")
+
+    if not omlx_ok:
+        _console.print("  [dim]oMLX: download from [bold]https://omlx.ai[/bold]  (no Homebrew cask)[/dim]")
+
+    if not env_ok:
+        if _prompt_confirm("Configure .env now? (runs vidlizer setup)", default=True):
+            _cmd_setup()
+
+    if not whisper_ok:
+        _in_pipx = "pipx" in sys.executable
+        hint = "pipx upgrade vidlizer" if _in_pipx else "pip install -U vidlizer"
+        if _prompt_confirm(f"Install mlx-whisper?  ({hint})", default=True):
+            cmd = ["pipx", "upgrade", "vidlizer"] if _in_pipx else [sys.executable, "-m", "pip", "install", "-U", "vidlizer"]
+            subprocess.run(cmd)
+
+    _console.print("\n[dim]Run [bold]vidlizer doctor[/bold] to verify.[/dim]\n")
+
+
+def _cmd_doctor(fix: bool = False) -> int:
     """Read-only health check — shows provider and dependency status."""
     from vidlizer.detect import (
         check_ffmpeg, check_ollama, check_lmstudio, check_omlx,
@@ -843,9 +904,21 @@ def _cmd_doctor() -> int:
 
     any_fail = not ffmpeg_ok or not env_path.exists()
     if any_fail:
-        _console.print("[dim]Fix issues above, then run [bold]vidlizer setup[/bold] or re-check.[/dim]\n")
+        hint = "  Run [bold]vidlizer doctor --fix[/bold] to auto-install missing components.\n"
+        _console.print(f"[dim]{hint}[/dim]")
     else:
         _console.print("[green]All core checks passed.[/green]\n")
+
+    if fix:
+        _run_doctor_fix(
+            ffmpeg_ok=ffmpeg_ok,
+            ollama_ok=ollama_ok,
+            lms_ok=lms_ok,
+            omlx_ok=omlx_ok,
+            env_ok=env_path.exists(),
+            whisper_ok=whisper_ok,
+        )
+
     return 0 if not any_fail else 1
 
 
@@ -863,7 +936,7 @@ def _main() -> int:
     if sys.argv[1:2] == ["setup"]:
         return _cmd_setup()
     if sys.argv[1:2] == ["doctor"]:
-        return _cmd_doctor()
+        return _cmd_doctor(fix="--fix" in sys.argv[2:])
     if sys.argv[1:2] == ["mcp-setup"]:
         return _cmd_mcp_setup()
 

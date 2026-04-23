@@ -42,11 +42,10 @@ def ensure_ffmpeg(console) -> bool:
 
 def ensure_transcriber(console) -> bool:
     """Check for mlx-whisper (Apple MLX); pip-install if missing."""
-    try:
-        import mlx_whisper  # noqa: F401
+    import importlib.util
+    if importlib.util.find_spec("mlx_whisper") is not None:
         return True
-    except ImportError:
-        return _pip_install("mlx-whisper", console)
+    return _pip_install("mlx-whisper", console)
 
 
 def run_checks(console) -> None:
