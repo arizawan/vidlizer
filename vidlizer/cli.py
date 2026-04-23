@@ -561,7 +561,8 @@ def _cmd_setup() -> int:
     elif primary_name in ("LM Studio", "oMLX", "Custom OpenAI-compatible"):
         env_values["OPENAI_BASE_URL"] = primary_url or "http://localhost:1234/v1"
         env_values["OPENAI_MODEL"]    = primary_model or ""
-        env_values["OPENAI_API_KEY"]  = custom_openai_key or os.getenv("OPENAI_API_KEY", "lm-studio")
+        _default_key = "local" if primary_name == "oMLX" else "lm-studio"
+        env_values["OPENAI_API_KEY"]  = custom_openai_key or os.getenv("OPENAI_API_KEY", _default_key)
     elif primary_name == "OpenRouter":
         env_values["OPENROUTER_API_KEY"] = or_api_key
         env_values["OPENROUTER_MODEL"]   = primary_model or "google/gemini-2.5-flash"
