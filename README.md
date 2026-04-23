@@ -47,7 +47,7 @@ vidlizer document.pdf
 - **Cost guard** — aborts if spend exceeds `MAX_COST_USD` (default $1.00)
 - **Live progress** — Rich streaming indicator shows elapsed time and token count per batch
 - **MCP server** — use from Claude Code, Cursor, Claude Desktop; provider/model locked via env vars; result includes `model_used` + `provider_used`
-- **Auto-install** — missing `ffmpeg` is brew-installed; `mlx-whisper` is pip-installed on first audio video
+- **Auto-install** — missing `ffmpeg` is brew-installed; `mlx-whisper` bundled in default install (macOS)
 - **Mac-native** — file picker dialog, Apple MLX transcription, handles macOS Unicode filenames (e.g. "11:26 AM")
 
 ---
@@ -298,7 +298,7 @@ For videos with an audio track, vidlizer automatically:
 2. Transcribes with **Apple MLX Whisper** (Neural Engine + GPU on M-series)
 3. Merges each transcript segment into the nearest flow step as `speech`
 
-On first use, `mlx-whisper` is pip-installed and the base model (~150 MB) is downloaded once.
+`mlx-whisper` is included in the default install on macOS. The base Whisper model (~150 MB) is downloaded on first transcription.
 
 To opt out: `--no-transcript`
 

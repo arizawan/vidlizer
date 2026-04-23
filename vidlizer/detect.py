@@ -117,9 +117,8 @@ def check_openrouter(key: str | None = None) -> tuple[bool, str, str]:
 
 
 def check_whisper() -> tuple[bool, str]:
-    """Return (ok, status_string)."""
-    try:
-        import mlx_whisper  # noqa: F401
+    """Return (ok, status_string) — uses find_spec to avoid MLX Metal init hang."""
+    import importlib.util
+    if importlib.util.find_spec("mlx_whisper") is not None:
         return True, "installed"
-    except ImportError:
-        return False, "not installed"
+    return False, "not installed"

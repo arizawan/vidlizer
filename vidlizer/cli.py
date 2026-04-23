@@ -832,9 +832,9 @@ def _cmd_doctor() -> int:
     whisper_ok, whisper_det = check_whisper()
     _in_pipx = "pipx" in sys.executable
     _whisper_hint = (
-        "optional — run: pipx inject vidlizer mlx-whisper"
+        "not installed — run: pipx upgrade vidlizer"
         if _in_pipx
-        else "optional — run: pip install \"vidlizer[transcribe]\""
+        else "not installed — run: pip install -U vidlizer"
     )
     _row("mlx-whisper", whisper_ok, whisper_det if whisper_ok else _whisper_hint)
 

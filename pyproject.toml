@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vidlizer"
-version = "0.2.10"
+version = "0.2.12"
 description = "Analyze any video, image, or PDF with a vision LLM — get structured JSON per scene. Local (Ollama/LM Studio) or cloud (OpenRouter). CLI + MCP server."
 readme = "README.md"
 license = { text = "MIT" }
@@ -31,6 +31,7 @@ dependencies = [
     "rich>=13.0",
     "pymupdf>=1.24",
     "yt-dlp>=2024.1",
+    "mlx-whisper>=0.4; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]
