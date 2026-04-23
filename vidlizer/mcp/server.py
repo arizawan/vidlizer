@@ -49,7 +49,7 @@ app = FastMCP(
 
 # ─── helpers ────────────────────────────────────────────────────────────────
 
-import re as _re
+import re as _re  # noqa: E402
 
 _UNICODE_SPACES = _re.compile(
     r"[   -​  　﻿]"

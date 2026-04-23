@@ -4,10 +4,12 @@
 
 **Feed it any video, image, or PDF — get back a structured JSON timeline of everything that happened.**
 
+[![PyPI](https://img.shields.io/pypi/v/vidlizer.svg)](https://pypi.org/project/vidlizer/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-223%20passing-brightgreen.svg)](#testing)
+[![CI](https://github.com/arizawan/vidlizer/actions/workflows/ci.yml/badge.svg)](https://github.com/arizawan/vidlizer/actions)
+[![Tests](https://img.shields.io/badge/tests-220%20passing-brightgreen.svg)](#testing)
 
 ![demo](assets/demo.gif)
 
@@ -63,13 +65,53 @@ vidlizer document.pdf
 
 ## 🚀 Install
 
+### Option 1 — pipx (recommended, isolated)
+
+```bash
+pipx install vidlizer
+vidlizer setup    # interactive wizard: detects providers, writes .env
+```
+
+### Option 2 — pip / virtualenv
+
+```bash
+pip install vidlizer
+vidlizer setup
+```
+
+### Option 3 — from source
+
 ```bash
 git clone https://github.com/arizawan/vidlizer.git
 cd vidlizer
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
-cp env.sample .env        # configure provider + keys
+vidlizer setup    # or: cp env.sample .env
 ```
+
+### First-run wizard
+
+`vidlizer setup` detects all installed providers, lets you pick primary + fallback, and writes a `.env` for you. It also offers to pull a vision model for Ollama if none is installed.
+
+```
+$ vidlizer setup
+  Detected providers:
+    1.  Ollama        → qwen2.5vl:3b
+    2.  OpenRouter    → google/gemma-3-27b-it:free
+
+  Primary provider (1–2): 1
+  Fallback (1–1, Enter to skip): 2
+
+✓  .env written → /your/project/.env
+```
+
+### Health check
+
+```bash
+vidlizer doctor   # shows ffmpeg, .env, provider, model status
+```
+
+### Manual provider setup
 
 **Ollama** (fully offline, no API key):
 
@@ -282,6 +324,7 @@ options:
   --fps FPS             Extract at fixed FPS instead of scene-change
   --scale PX            Frame width in pixels (default 512)
   --batch-size N        Frames per API call (0 = auto, default 1 for all providers)
+  --concurrency N       Parallel batch workers (default: 4 for OpenRouter, 1 for local)
   --dedup-threshold N   Perceptual dedup Hamming distance (default 8, 0 = off)
   --no-transcript       Skip audio transcription
   --max-cost USD        Abort if spend exceeds this (default 1.00)

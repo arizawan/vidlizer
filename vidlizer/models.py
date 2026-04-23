@@ -163,7 +163,7 @@ _FALLBACK: list[dict] = [
     {"id": "google/gemini-2.5-flash-lite",        "name": "Gemini 2.5 Flash Lite",     "input_usd_per_1m": 0.075, "output_usd_per_1m": 0.30,  "free": False, "rate_limited": False, "per_req_limit_tokens": None, "context_length": 1048576},
     {"id": "google/gemini-2.5-pro",               "name": "Gemini 2.5 Pro",            "input_usd_per_1m": 1.25,  "output_usd_per_1m": 10.0,  "free": False, "rate_limited": False, "per_req_limit_tokens": None, "context_length": 1048576},
     {"id": "nvidia/nemotron-nano-12b-v2-vl:free", "name": "Nemotron Nano 12B",         "input_usd_per_1m": 0.0,   "output_usd_per_1m": 0.0,   "free": True,  "rate_limited": True,  "per_req_limit_tokens": 8192, "context_length": 131072},
-    {"id": "google/gemma-4-31b-it:free",          "name": "Gemma 4 31B",               "input_usd_per_1m": 0.0,   "output_usd_per_1m": 0.0,   "free": True,  "rate_limited": True,  "per_req_limit_tokens": None, "context_length": 131072},
+    {"id": "google/gemma-3-27b-it:free",           "name": "Gemma 3 27B",               "input_usd_per_1m": 0.0,   "output_usd_per_1m": 0.0,   "free": True,  "rate_limited": True,  "per_req_limit_tokens": None, "context_length": 131072},
     {"id": "openai/gpt-4o",                       "name": "GPT-4o",                    "input_usd_per_1m": 2.50,  "output_usd_per_1m": 10.0,  "free": False, "rate_limited": False, "per_req_limit_tokens": None, "context_length": 128000},
     {"id": "openai/gpt-4o-mini",                  "name": "GPT-4o Mini",               "input_usd_per_1m": 0.15,  "output_usd_per_1m": 0.60,  "free": False, "rate_limited": False, "per_req_limit_tokens": None, "context_length": 128000},
 ]

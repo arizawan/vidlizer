@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-vidlizer smoke test — tests EVERY available provider in sequence.
+vidlizer smoke test — detects all providers, then prompts you to pick primary + fallback.
 
-Provider order (auto-detect, local first):
+Auto-detect order (local first):
   1. Ollama      (local, free) — unloaded from VRAM after test
   2. OpenAI-compat (LM Studio / oMLX, local) — unloaded after test
   3. OpenRouter  (cloud, :free models only)
@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -95,127 +94,110 @@ def _record(
 
 
 # ---------------------------------------------------------------------------
-# Environment detection
+# Environment detection (delegated to vidlizer.detect)
 # ---------------------------------------------------------------------------
 
-def _check_ffmpeg() -> tuple[bool, str]:
-    if not shutil.which("ffmpeg"):
-        return False, "not found"
+from vidlizer.detect import (
+    check_ffmpeg      as _check_ffmpeg,
+    check_ollama      as _check_ollama,
+    check_lmstudio    as _check_lmstudio,
+    check_omlx        as _check_omlx,
+    check_openrouter  as _check_openrouter,
+    check_whisper     as _check_whisper,
+    pick_best_vision  as _pick_best_vision,
+    OL_PREFS          as _OL_PREFS,
+    OLLAMA_MINIMAL    as _OLLAMA_MINIMAL,
+    LMSTUDIO_MINIMAL  as _LMSTUDIO_MINIMAL,
+    OMLX_MINIMAL      as _OMLX_MINIMAL,
+)
+
+
+def _prompt_custom_port(prov_id: str, default_port: int) -> int | None:
+    """Ask for alternative port when provider isn't reachable. Returns port int or None."""
     try:
-        r = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
-        line = r.stdout.split("\n")[0]
-        ver = line.split("version ")[1].split(" ")[0] if "version " in line else "?"
-        return True, ver
-    except Exception:
-        return True, "?"
-
-
-def _check_ollama() -> tuple[bool, str, list[str]]:
-    try:
-        import requests
-        host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        r = requests.get(f"{host}/api/tags", timeout=3)
-        r.raise_for_status()
-        models = [m["name"] for m in r.json().get("models", [])]
-        return True, host, models
-    except Exception:
-        return False, os.getenv("OLLAMA_HOST", "http://localhost:11434"), []
-
-
-def _probe_openai_compat(base: str, key: str = "local") -> tuple[bool, list[str]]:
-    try:
-        import requests
-        r = requests.get(f"{base.rstrip('/')}/models",
-                         headers={"Authorization": f"Bearer {key}"}, timeout=3)
-        r.raise_for_status()
-        models = [m["id"] for m in r.json().get("data", [])]
-        return True, models
-    except Exception:
-        return False, []
-
-
-def _check_lmstudio() -> tuple[bool, str, list[str]]:
-    base = "http://localhost:1234/v1"
-    ok, mdls = _probe_openai_compat(base, os.getenv("OPENAI_API_KEY", "lm-studio"))
-    return ok, base, mdls
-
-
-def _check_omlx() -> tuple[bool, str, list[str]]:
-    base = "http://localhost:8000/v1"
-    ok, mdls = _probe_openai_compat(base, "local")
-    return ok, base, mdls
-
-
-def _check_openrouter() -> tuple[bool, str, str]:
-    key = os.getenv("OPENROUTER_API_KEY", "")
-    if not key:
-        return False, "not set", ""
-    free_candidates = [
-        "google/gemma-3-27b-it:free",
-        "google/gemma-4-31b-it:free",
-        "nvidia/nemotron-nano-12b-v2-vl:free",
-        "meta-llama/llama-4-scout:free",
-    ]
-    try:
-        import requests
-        r = requests.get(
-            "https://openrouter.ai/api/v1/models",
-            headers={"Authorization": f"Bearer {key}"}, timeout=8,
-        )
-        r.raise_for_status()
-        live_ids = {m["id"] for m in r.json().get("data", [])}
-        for candidate in free_candidates:
-            if candidate in live_ids:
-                return True, f"key ...{key[-4:]}", candidate
-        for m in r.json().get("data", []):
-            if m["id"].endswith(":free"):
-                arch = m.get("architecture", {})
-                modalities = arch.get("input_modalities") or arch.get("modality", "")
-                if "image" in str(modalities):
-                    return True, f"key ...{key[-4:]}", m["id"]
-    except Exception:
+        raw = input(f"  {prov_id} not reachable at :{default_port}. Custom port? (Enter to skip): ").strip()
+        if raw.isdigit() and 1 <= int(raw) <= 65535:
+            return int(raw)
+    except (EOFError, KeyboardInterrupt):
         pass
-    return True, f"key ...{key[-4:]}", "google/gemma-4-31b-it:free"
-
-
-def _check_whisper() -> tuple[bool, str]:
-    try:
-        import mlx_whisper  # noqa: F401
-        return True, "installed"
-    except ImportError:
-        return False, "not installed"
+    return None
 
 
 # ---------------------------------------------------------------------------
 # Vision model detection + interactive setup
 # ---------------------------------------------------------------------------
 
-_VISION_HINTS = frozenset([
-    "vl", "vision", "llava", "minicpm-v", "visual", "clip",
-    "pixtral", "idefics", "cogvlm", "internvl", "phi-3-v",
-    "molmo", "qwen2.5vl", "qwen3vl", "gemma-3",
-])
+def _pick_providers(
+    candidates: list[tuple[str, list[str], str, str]],
+) -> list[tuple[str, list[str], str, str]]:
+    """Prompt user to select primary and optional fallback provider from candidates."""
+    console.print()
+    console.print(Rule("[bold cyan]Provider Selection[/bold cyan]", style="dim"))
+    console.print()
 
-# Minimal vision models for each local provider
-_OLLAMA_MINIMAL   = "qwen2.5vl:3b"          # ~3.2 GB — smallest Ollama vision model with reliable JSON output
-_LMSTUDIO_MINIMAL = "mlx-community/Qwen2.5-VL-3B-Instruct-8bit"
-_OMLX_MINIMAL     = "mlx-community/Qwen2.5-VL-3B-Instruct-8bit"
+    def _model_hint(prov_id: str, mdls: list[str]) -> str:
+        if prov_id == "openrouter":
+            return mdls[0] if mdls else "?"
+        return _pick_best_vision(mdls, _OL_PREFS) or "no vision model"
 
-_OL_PREFS = ["qwen2.5vl:7b", "qwen2.5vl:3b", "minicpm-v:8b", "llava-onevision:7b", "llava"]
+    # Single candidate — just confirm
+    if len(candidates) == 1:
+        prov_id, mdls, _h, _b = candidates[0]
+        hint = _model_hint(prov_id, mdls)
+        console.print(f"  Detected: [magenta]{prov_id}[/magenta]  [dim]{hint}[/dim]")
+        if not _prompt_yn(f"Use {prov_id} as primary provider?", default=True):
+            console.print("  [dim]Aborted.[/dim]")
+            return []
+        return candidates
 
+    # Multiple candidates — numbered pick
+    console.print("  Detected providers:")
+    for i, (prov_id, mdls, _h, _b) in enumerate(candidates, 1):
+        console.print(f"    [bold]{i}[/bold].  [magenta]{prov_id:<12}[/magenta] [dim]{_model_hint(prov_id, mdls)}[/dim]")
 
-def _is_vision_model(mid: str) -> bool:
-    m = mid.lower()
-    return any(h in m for h in _VISION_HINTS)
+    # Primary (required)
+    primary_idx = None
+    while primary_idx is None:
+        try:
+            raw = input(f"\n  Primary provider (1–{len(candidates)}): ").strip()
+            n = int(raw)
+            if 1 <= n <= len(candidates):
+                primary_idx = n - 1
+            else:
+                console.print(f"  [yellow]Enter a number between 1 and {len(candidates)}.[/yellow]")
+        except ValueError:
+            console.print("  [yellow]Enter a number.[/yellow]")
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n  [dim]Aborted.[/dim]")
+            return []
 
+    # Fallback (optional)
+    remaining = [(orig_i, c) for orig_i, c in enumerate(candidates) if orig_i != primary_idx]
+    fallback_orig_idx = None
+    if remaining:
+        console.print()
+        console.print("  Fallback provider (Enter to skip):")
+        for n, (orig_i, (prov_id, mdls, _h, _b)) in enumerate(remaining, 1):
+            console.print(f"    [bold]{n}[/bold].  [magenta]{prov_id:<12}[/magenta] [dim]{_model_hint(prov_id, mdls)}[/dim]")
+        while True:
+            try:
+                raw = input(f"  Fallback (1–{len(remaining)}, or Enter to skip): ").strip()
+                if not raw:
+                    break
+                n = int(raw)
+                if 1 <= n <= len(remaining):
+                    fallback_orig_idx = remaining[n - 1][0]
+                    break
+                console.print(f"  [yellow]Enter a number between 1 and {len(remaining)} or press Enter.[/yellow]")
+            except ValueError:
+                console.print("  [yellow]Enter a number or press Enter to skip.[/yellow]")
+            except (EOFError, KeyboardInterrupt):
+                break
 
-def _pick_best_vision(models: list[str], prefs: list[str]) -> str | None:
-    """Return preferred vision model, then any vision model, then None."""
-    for pref in prefs:
-        for m in models:
-            if m.lower().startswith(pref.split(":")[0].lower()):
-                return m
-    return next((m for m in models if _is_vision_model(m)), None)
+    result = [candidates[primary_idx]]
+    if fallback_orig_idx is not None:
+        result.append(candidates[fallback_orig_idx])
+    return result
 
 
 def _prompt_yn(msg: str, default: bool = False) -> bool:
@@ -1088,6 +1070,20 @@ def main() -> int:
     or_ok, or_detail, or_model     = _check_openrouter()
     whisper_ok, whisper_det        = _check_whisper()
 
+    # Retry unreachable local providers with custom port
+    if not ollama_ok and not args.provider:
+        port = _prompt_custom_port("Ollama", 11434)
+        if port:
+            ollama_ok, ol_host, ol_mdls = _check_ollama(f"http://localhost:{port}")
+    if not lms_ok and not args.provider:
+        port = _prompt_custom_port("LM Studio", 1234)
+        if port:
+            lms_ok, lms_base, lms_mdls = _check_lmstudio(f"http://localhost:{port}/v1")
+    if not omlx_ok and not args.provider:
+        port = _prompt_custom_port("oMLX", 8000)
+        if port:
+            omlx_ok, omlx_base, omlx_mdls = _check_omlx(f"http://localhost:{port}/v1")
+
     _record("ffmpeg",        "pass" if ffmpeg_ok else "fail", ffmpeg_ver)
     _record("Ollama",        "pass" if ollama_ok else "skip",
             f"{ol_host}  [{', '.join(ol_mdls[:3])}{'…' if len(ol_mdls) > 3 else ''}]"
@@ -1150,6 +1146,12 @@ def main() -> int:
             "  Start Ollama, LM Studio, oMLX, or set OPENROUTER_API_KEY."
         )
         return 1
+
+    # ── Provider selection: pick primary + optional fallback ──────────────────
+    if not args.provider:
+        candidates = _pick_providers(candidates)
+        if not candidates:
+            return 1
 
     # ── Setup phase: check for vision models, offer downloads ─────────────────
     # Runs interactively, one provider at a time, before any tests start.

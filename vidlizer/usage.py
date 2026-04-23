@@ -92,7 +92,7 @@ def clear_stats() -> int:
     """Delete the usage log. Returns number of records deleted."""
     if not _USAGE_PATH.exists():
         return 0
-    lines = [l for l in _USAGE_PATH.read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = [ln for ln in _USAGE_PATH.read_text(encoding="utf-8").splitlines() if ln.strip()]
     count = len(lines)
     _USAGE_PATH.unlink()
     return count

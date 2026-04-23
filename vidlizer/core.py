@@ -114,6 +114,8 @@ def _setup_provider(
     from vidlizer.models import fetch_models
     with _console.status("[dim]fetching model pricing…[/dim]", spinner="dots2"):
         _live_models = fetch_models(api_key)
+    import vidlizer.http as _http_mod
+    _http_mod._live_models = _live_models
     return api_key, endpoint, req_headers, False, False, [], "", "", _live_models
 
 

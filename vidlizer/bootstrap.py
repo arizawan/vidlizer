@@ -9,7 +9,7 @@ import sys
 
 def _brew_install(pkg: str, console) -> bool:
     if not shutil.which("brew"):
-        console.print(f"[red]✗[/red]  Homebrew not found — install from https://brew.sh then re-run")
+        console.print("[red]✗[/red]  Homebrew not found — install from https://brew.sh then re-run")
         return False
     console.print(f"[cyan]→[/cyan] installing [bold]{pkg}[/bold] via Homebrew…")
     r = subprocess.run(["brew", "install", pkg], capture_output=True, text=True)

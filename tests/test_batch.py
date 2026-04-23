@@ -231,3 +231,75 @@ def test_call_model_parallel_steps_renumbered(monkeypatch, tmp_path):
     assert len(steps) == 2  # 2 chunks × 1 step each
     for i, step in enumerate(steps):
         assert step["step"] == i + 1
+
+
+# ---------------------------------------------------------------------------
+# CostCapExceeded propagates through repair path (serial + parallel)
+# ---------------------------------------------------------------------------
+
+def test_cost_cap_exceeded_propagates_through_serial_repair(monkeypatch, tmp_path):
+    """CostCapExceeded raised during repair POST must propagate — not be swallowed."""
+    from vidlizer.http import CostCapExceeded
+
+    frames = _make_frames(tmp_path, 2)
+    call_count = 0
+
+    def _mock_post(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.status_code = 200
+        if call_count == 1:
+            # First call: return bad JSON → triggers repair
+            content_escaped = json.dumps("broken json {{{")
+        else:
+            # Second call (repair): simulate cost cap hit
+            raise CostCapExceeded("cap exceeded during repair")
+        lines = [
+            f'data: {{"choices":[{{"delta":{{"content":{content_escaped}}}}}],"usage":null}}'.encode(),
+            b'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":5}}',
+            b'data: [DONE]',
+        ]
+        mock_resp.iter_lines.return_value = iter(lines)
+        return mock_resp
+
+    monkeypatch.setattr("vidlizer.http.requests.post", _mock_post)
+    with pytest.raises(CostCapExceeded):
+        call_model(
+            api_key="k", model="m", frames=frames, timeout=30,
+            verbose=False, batch_size=1,
+        )
+
+
+def test_cost_cap_exceeded_propagates_through_parallel_repair(monkeypatch, tmp_path):
+    """Same guarantee for the parallel path."""
+    from vidlizer.http import CostCapExceeded
+
+    frames = _make_frames(tmp_path, 4)
+    call_count = 0
+
+    def _mock_post(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.status_code = 200
+        if call_count % 2 == 1:
+            content_escaped = json.dumps("broken {{{")
+        else:
+            raise CostCapExceeded("cap exceeded during repair")
+        lines = [
+            f'data: {{"choices":[{{"delta":{{"content":{content_escaped}}}}}],"usage":null}}'.encode(),
+            b'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":5}}',
+            b'data: [DONE]',
+        ]
+        mock_resp.iter_lines.return_value = iter(lines)
+        return mock_resp
+
+    monkeypatch.setattr("vidlizer.http.requests.post", _mock_post)
+    with pytest.raises(CostCapExceeded):
+        call_model(
+            api_key="k", model="m", frames=frames, timeout=30,
+            verbose=False, batch_size=2, concurrency=2,
+        )

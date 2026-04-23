@@ -186,3 +186,54 @@ def test_cli_start_end_flags(test_video, tmp_path, mock_openrouter_server):
     )
     assert r.returncode == 0, f"stderr:\n{r.stderr[-2000:]}"
     assert out.exists()
+
+
+# ---------------------------------------------------------------------------
+# Subprocess: vidlizer doctor
+# ---------------------------------------------------------------------------
+
+def test_doctor_exits_nonzero_when_env_missing(tmp_path):
+    """doctor returns exit code 1 when no .env exists."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in {"PROVIDER", "OPENROUTER_API_KEY", "OLLAMA_MODEL", "DOTENV_PATH"}}
+    r = subprocess.run(
+        [sys.executable, "-m", "vidlizer.cli", "doctor"],
+        capture_output=True, text=True, timeout=10,
+        env=env,
+        cwd=str(tmp_path),
+    )
+    assert r.returncode == 1
+
+
+def test_doctor_output_contains_expected_sections():
+    """doctor prints ffmpeg and provider check headers."""
+    r = subprocess.run(
+        [sys.executable, "-m", "vidlizer.cli", "doctor"],
+        capture_output=True, text=True, timeout=10,
+    )
+    combined = r.stdout + r.stderr
+    assert "ffmpeg" in combined.lower()
+    assert ".env" in combined.lower()
+
+
+# ---------------------------------------------------------------------------
+# Subprocess: vidlizer setup
+# ---------------------------------------------------------------------------
+
+def test_setup_writes_env_file(tmp_path):
+    """setup detects OpenRouter via fake key, writes .env in cwd."""
+    # 3× Enter = skip port retries for offline local providers
+    # "1" + Enter = select OpenRouter as primary (only candidate)
+    piped = "\n\n\n1\n"
+    env = {
+        **os.environ,
+        "OPENROUTER_API_KEY": "sk-test-fake",  # non-empty → OR detected
+    }
+    r = subprocess.run(
+        [sys.executable, "-m", "vidlizer.cli", "setup"],
+        input=piped, capture_output=True, text=True, timeout=15,
+        env=env, cwd=str(tmp_path),
+    )
+    env_file = tmp_path / ".env"
+    assert env_file.exists(), f"No .env written. stderr:\n{r.stderr[-1000:]}"
+    assert "PROVIDER" in env_file.read_text()

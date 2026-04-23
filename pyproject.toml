@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vidlizer"
-version = "0.1.0"
+version = "0.2.1"
 description = "Feed it any video, image, or PDF — get back a structured JSON timeline of everything that happened."
 readme = "README.md"
 license = { text = "MIT" }
@@ -51,6 +51,12 @@ Repository = "https://github.com/arizawan/vidlizer"
 vidlizer = "vidlizer.cli:main"
 vidlizer-mcp = "vidlizer.mcp.server:main"
 
+[tool.ruff.lint]
+ignore = ["E701"]  # allow aligned inline-if blocks
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["vidlizer*"]
+
+[tool.setuptools.package-data]
+vidlizer = ["env.sample"]

@@ -9,7 +9,7 @@ from pathlib import Path
 from rich.console import Console
 
 from vidlizer.frames import encode_frame
-from vidlizer.http import CostTracker, ImageLimitError, post
+from vidlizer.http import CostCapExceeded, CostTracker, ImageLimitError, post
 
 _console = Console(stderr=True, highlight=False)
 
@@ -293,6 +293,8 @@ def call_model(
             except json.JSONDecodeError:
                 try:
                     chunk_data = _repair_json(raw_text, label)
+                except CostCapExceeded:
+                    raise
                 except (json.JSONDecodeError, Exception) as repair_err:
                     _console.print(f"[yellow]⚠[/yellow]  {label} repair failed ({repair_err}) — skipping")
                     continue
@@ -349,6 +351,8 @@ def call_model(
         except json.JSONDecodeError:
             try:
                 chunk_data = _repair_json(raw_text, label)
+            except CostCapExceeded:
+                raise
             except (json.JSONDecodeError, Exception) as repair_err:
                 _console.print(f"[yellow]⚠[/yellow]  {label} repair failed ({repair_err}) — skipping")
                 continue
