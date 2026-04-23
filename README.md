@@ -11,7 +11,7 @@
 [![CI](https://github.com/arizawan/vidlizer/actions/workflows/ci.yml/badge.svg)](https://github.com/arizawan/vidlizer/actions)
 [![Tests](https://img.shields.io/badge/tests-248%20passing-brightgreen.svg)](#testing)
 
-![demo](assets/demo.gif)
+![demo](https://raw.githubusercontent.com/arizawan/vidlizer/main/assets/demo.gif)
 
 </div>
 
