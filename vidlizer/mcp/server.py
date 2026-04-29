@@ -181,34 +181,42 @@ async def analyze_video(
     force_rerun: bool = False,
 ) -> dict:
     """
-    Analyze a video, image, or PDF. Returns analysis_id + metadata.
+    Analyze a video, image, or PDF and return structured JSON via the configured LLM.
+
+    Call this tool first. It extracts frames, deduplicates near-identical ones, sends
+    them to the LLM, and caches the result. Use get_summary/get_phase/get_steps to
+    retrieve parts of the result without reloading everything (saves tokens). Repeated
+    calls with the same path and parameters return the cached result instantly unless
+    force_rerun=True.
 
     Supported inputs:
     - Local files: /absolute/path/to/video.mp4, image.png, document.pdf
     - URLs: YouTube, Vimeo, Loom, Twitter/X
 
-    Provider and model are set via MCP server environment variables (PROVIDER,
-    OPENAI_MODEL / OLLAMA_MODEL / OPENROUTER_MODEL). Fallback models are tried
-    automatically if the primary model fails.
-
-    After analysis, use get_summary/get_step/get_phase to retrieve parts
-    on demand instead of loading everything at once (saves tokens).
+    Provider and model are read from MCP server env vars (PROVIDER + OPENAI_MODEL /
+    OLLAMA_MODEL / OPENROUTER_MODEL). Fallback models are tried automatically if the
+    primary fails.
 
     Args:
-        path: Local file path or URL
-        max_frames: Max frames to extract (default 60, hard cap 200)
-        start: Analyze from this timestamp in seconds
-        end: Analyze up to this timestamp in seconds
-        scene_threshold: Scene-change sensitivity 0–1 (lower = more frames, default 0.1)
-        min_interval: Min seconds between frames (default 2.0)
-        fps: Fixed FPS extraction — overrides scene-change detection
-        scale: Frame width in pixels (default 512)
-        batch_size: Frames per API call (0=auto, resolves to 1)
-        dedup_threshold: Perceptual dedup Hamming distance (0=off, default 8)
-        transcript: Auto-transcribe audio via Apple MLX Whisper (default True)
-        max_cost_usd: Abort if spend exceeds this in USD (default 1.00)
-        timeout: Per-request timeout in seconds (default 600)
-        force_rerun: Re-analyze even if cached result exists (default False)
+        path: Local file path or URL to analyze.
+        max_frames: Maximum frames to extract (default 60, hard cap 200).
+        start: Start timestamp in seconds — analyze from this point onward.
+        end: End timestamp in seconds — stop analysis here.
+        scene_threshold: Scene-change sensitivity 0–1; lower = more frames captured (default 0.1).
+        min_interval: Minimum seconds between consecutive frames (default 2.0).
+        fps: Fixed frame rate extraction; overrides scene-change detection when set.
+        scale: Frame resize width in pixels sent to the LLM (default 512).
+        batch_size: Frames per LLM API call (0 = auto, resolves to 1).
+        dedup_threshold: Perceptual hash Hamming distance for deduplication (0 = off, default 8).
+        transcript: Transcribe audio via Apple MLX Whisper on macOS (default True).
+        max_cost_usd: Abort if estimated spend exceeds this amount in USD (default 1.00).
+        timeout: Per-request LLM timeout in seconds (default 600).
+        force_rerun: Ignore cached result and re-analyze from scratch (default False).
+
+    Returns:
+        Dict with keys: analysis_id (str), file (str), steps (int), duration_s (float),
+        model_used (str), provider_used (str), cached (bool), progress_log (list[str]),
+        next_steps (str) — a suggested follow-up call. On error: {"error": str, "analysis_id": None}.
     """
     _provider = os.getenv("PROVIDER", "").lower()
     _model = _resolve_model(_provider, "")
@@ -331,18 +339,36 @@ async def analyze_video(
 
 @app.tool()
 def list_analyses() -> list[dict]:
-    """List all stored analyses. Returns lightweight meta (no data payloads)."""
+    """
+    List all analyses stored in the local vidlizer cache.
+
+    Use this to discover existing analysis_ids without re-running analyze_video.
+    Returns lightweight metadata only — no flow steps or transcript data, so it
+    is safe to call even when many analyses are cached.
+
+    Returns:
+        List of dicts, each with: analysis_id (str), file (str), steps (int),
+        duration_s (float), created_at (str ISO timestamp). Empty list if no analyses exist.
+    """
     return store.list_all()
 
 
 @app.tool()
 def get_summary(analysis_id: str, level: str = "medium") -> str:
     """
-    Get a text summary of an analysis.
+    Get a human-readable text summary of a stored analysis.
+
+    Use this immediately after analyze_video to get an overview before drilling into
+    individual steps or phases. Prefer 'brief' for quick answers; 'full' for detailed
+    step-by-step breakdowns.
 
     Args:
-        analysis_id: ID returned by analyze_video or list_analyses
-        level: 'brief' (1 paragraph), 'medium' (phase groups, default), 'full' (one-liner per step)
+        analysis_id: ID returned by analyze_video or list_analyses.
+        level: Summary verbosity — 'brief' (1 paragraph), 'medium' (phase groups, default),
+               'full' (one sentence per step).
+
+    Returns:
+        Formatted text string. Returns an error string if analysis_id is not found.
     """
     rec = store.load(analysis_id)
     if not rec:
@@ -353,12 +379,19 @@ def get_summary(analysis_id: str, level: str = "medium") -> str:
 @app.tool()
 def get_step(analysis_id: str, step: int, full: bool = False) -> dict:
     """
-    Get a single flow step by number.
+    Get a single flow step by its step number.
+
+    Use when the user asks about a specific moment in the video by number.
+    For ranges, use get_steps. For named sections, use get_phase.
 
     Args:
-        analysis_id: ID from analyze_video
-        step: Step number (1-indexed)
-        full: Return all 11 fields. Default: core fields only (step, timestamp_s, phase, action, scene, speech).
+        analysis_id: ID from analyze_video or list_analyses.
+        step: Step number (1-indexed, as returned in the flow array).
+        full: Return all 11 LLM-extracted fields (default False returns core fields:
+              step, timestamp_s, phase, action, scene, speech).
+
+    Returns:
+        Dict of step fields. Returns {"error": str} if analysis_id or step not found.
     """
     rec = store.load(analysis_id)
     if not rec:
@@ -378,13 +411,20 @@ def get_steps(
     full: bool = False,
 ) -> list[dict]:
     """
-    Get a range of flow steps.
+    Get a consecutive range of flow steps from a stored analysis.
+
+    Use when the user asks about a span of the video (e.g., "steps 5 to 10").
+    For a single step, use get_step. For a named phase, use get_phase.
 
     Args:
-        analysis_id: ID from analyze_video
-        start_step: First step (inclusive, 1-indexed, default 1)
-        end_step: Last step (inclusive). Defaults to last step.
-        full: Return all fields (default: core fields only)
+        analysis_id: ID from analyze_video or list_analyses.
+        start_step: First step to return, inclusive and 1-indexed (default 1).
+        end_step: Last step to return, inclusive. Defaults to the final step.
+        full: Return all 11 LLM-extracted fields (default False returns core fields only).
+
+    Returns:
+        List of step dicts in ascending step order. Returns a single-element list with
+        {"error": str} if analysis_id is not found.
     """
     rec = store.load(analysis_id)
     if not rec:
@@ -397,12 +437,21 @@ def get_steps(
 @app.tool()
 def get_phase(analysis_id: str, phase: str, full: bool = False) -> list[dict]:
     """
-    Get all flow steps in a named phase.
+    Get all flow steps belonging to a named phase of the analysis.
+
+    Phases are high-level sections the LLM assigns to groups of steps (e.g.,
+    'Introduction', 'Demo', 'Checkout'). Use get_summary(level='medium') first
+    to discover what phase names exist, then call this tool for details.
 
     Args:
-        analysis_id: ID from analyze_video
-        phase: Phase name (e.g. 'Introduction', 'Demo') — case-insensitive
-        full: Return all fields (default: core fields only)
+        analysis_id: ID from analyze_video or list_analyses.
+        phase: Phase name to filter by — case-insensitive substring match
+               (e.g. 'intro', 'Introduction', 'DEMO' all match 'Introduction').
+        full: Return all 11 LLM-extracted fields (default False returns core fields only).
+
+    Returns:
+        List of step dicts for the matching phase. Empty list if phase name not found.
+        Returns single-element list with {"error": str} if analysis_id is not found.
     """
     rec = store.load(analysis_id)
     if not rec:
@@ -419,13 +468,24 @@ def search_analysis(
     fields: list[str] | None = None,
 ) -> list[dict]:
     """
-    Search flow steps for matching text (case-insensitive substring).
+    Search flow steps for text matching a keyword or phrase (case-insensitive substring).
+
+    Use when the user asks "find where X appears" or "which steps mention Y".
+    Returns only the steps that match, with the matched field and value highlighted.
+    Either query or keyword must be provided; they are interchangeable.
 
     Args:
-        analysis_id: ID from analyze_video
-        query: Text to search for (alias: keyword)
-        keyword: Alias for query
-        fields: Fields to search. Default: scene, action, text_visible, speech, observations
+        analysis_id: ID from analyze_video or list_analyses.
+        query: Text to search for across flow step fields.
+        keyword: Alias for query — use either, not both.
+        fields: List of step fields to search. Defaults to:
+                ['scene', 'action', 'text_visible', 'speech', 'observations'].
+
+    Returns:
+        List of match dicts with: step (int), timestamp_s (float), phase (str),
+        matched_field (str), matched_value (str), action (str).
+        Empty list if no steps match. Returns [{"error": str}] if analysis_id not found
+        or if neither query nor keyword is provided.
     """
     search_term = query or keyword
     if not search_term:
@@ -459,12 +519,21 @@ def get_transcript(
     end_s: float | None = None,
 ) -> list[dict]:
     """
-    Get transcript segments, optionally filtered by time range.
+    Get audio transcript segments from a stored analysis, optionally filtered by time range.
+
+    Transcription is performed via Apple MLX Whisper on macOS (when transcript=True in
+    analyze_video). Returns an empty list if no transcript was captured.
+    Use start_s/end_s to retrieve only the portion relevant to a specific video segment.
 
     Args:
-        analysis_id: ID from analyze_video
-        start_s: Start time in seconds (optional)
-        end_s: End time in seconds (optional)
+        analysis_id: ID from analyze_video or list_analyses.
+        start_s: Return segments that overlap or start at/after this timestamp (seconds).
+        end_s: Return segments that overlap or end at/before this timestamp (seconds).
+
+    Returns:
+        List of segment dicts with: start (float), end (float), text (str).
+        Empty list if no transcript exists or no segments fall in the given range.
+        Returns [{"error": str}] if analysis_id is not found.
     """
     rec = store.load(analysis_id)
     if not rec:
@@ -482,13 +551,19 @@ def get_transcript(
 @app.tool()
 def get_full_analysis(analysis_id: str) -> dict:
     """
-    Get the complete raw analysis data (flow array + transcript).
+    Get the complete raw JSON output of a stored analysis (all flow steps + transcript).
 
-    Use sparingly — output can be large. Prefer get_summary/get_phase/get_steps
-    to retrieve only what you need.
+    Avoid this unless you genuinely need everything — output can be very large for long
+    videos (hundreds of steps). Prefer get_summary for overviews, get_phase/get_steps
+    for sections, or search_analysis for targeted lookups.
 
     Args:
-        analysis_id: ID from analyze_video
+        analysis_id: ID from analyze_video or list_analyses.
+
+    Returns:
+        Dict with keys: flow (list of all step dicts), transcript (list of segment dicts),
+        metadata (dict with file, model, provider, duration). Returns {"error": str}
+        if analysis_id is not found.
     """
     rec = store.load(analysis_id)
     if not rec:
@@ -499,10 +574,17 @@ def get_full_analysis(analysis_id: str) -> dict:
 @app.tool()
 def delete_analysis(analysis_id: str) -> dict:
     """
-    Delete a stored analysis.
+    Delete a stored analysis from the local vidlizer cache.
+
+    Use when an analysis is no longer needed to free disk space.
+    This operation is irreversible — the analysis must be re-run to recover the data.
 
     Args:
-        analysis_id: ID from analyze_video or list_analyses
+        analysis_id: ID from analyze_video or list_analyses.
+
+    Returns:
+        Dict with: deleted (bool — True if found and removed, False if not found),
+        analysis_id (str — echoes the input ID).
     """
     ok = store.delete(analysis_id)
     return {"deleted": ok, "analysis_id": analysis_id}
@@ -511,10 +593,15 @@ def delete_analysis(analysis_id: str) -> dict:
 @app.tool()
 def get_usage_stats() -> dict:
     """
-    Return token and cost usage statistics across all vidlizer runs.
+    Return cumulative token and cost usage statistics across all vidlizer runs.
 
-    Shows total runs, total cost, total tokens, and a per-model breakdown
-    sorted by number of uses. Covers both CLI and MCP runs.
+    Use to monitor spending, compare model efficiency, or audit usage before
+    running an expensive analysis. Covers both CLI and MCP-initiated runs.
+
+    Returns:
+        Dict with: total_runs (int), total_cost_usd (float), total_tokens (int),
+        by_model (list of dicts sorted by uses desc, each with: model, provider,
+        runs, tokens, cost_usd).
     """
     from vidlizer.usage import get_stats
     return get_stats()
@@ -523,9 +610,14 @@ def get_usage_stats() -> dict:
 @app.tool()
 def clear_usage_stats() -> dict:
     """
-    Delete the usage log (reset all counters to zero).
+    Delete the usage log and reset all cost/token counters to zero.
 
-    Use when you want to start fresh tracking — e.g., beginning of a new project.
+    Use at the start of a new project or billing period to get clean tracking.
+    This is irreversible — historical usage data cannot be recovered after clearing.
+
+    Returns:
+        Dict with: cleared (bool — always True), records_deleted (int — number of
+        log entries removed).
     """
     from vidlizer.usage import clear_stats
     deleted = clear_stats()
