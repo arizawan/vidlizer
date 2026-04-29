@@ -506,7 +506,7 @@ claude mcp add-json vidlizer '{"type":"stdio","command":"/path/to/vidlizer-mcp",
       "env": {
         "PROVIDER": "ollama",
         "OLLAMA_HOST": "http://localhost:11434",
-        "OLLAMA_MODEL": "qwen2.5vl:7b"
+        "OLLAMA_MODEL": "gemma4:2b"
       }
     }
   }
