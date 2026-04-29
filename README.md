@@ -70,21 +70,27 @@ vidlizer document.pdf
 
 ## 🚀 Install
 
-### Option 1 — pipx (recommended, isolated)
+### Option 1 — uvx (no install, run directly)
+
+```bash
+uvx vidlizer setup
+```
+
+### Option 2 — pipx (isolated, globally available)
 
 ```bash
 pipx install vidlizer
 vidlizer setup    # interactive wizard: detects providers, writes .env
 ```
 
-### Option 2 — pip / virtualenv
+### Option 3 — pip / virtualenv
 
 ```bash
 pip install vidlizer
 vidlizer setup
 ```
 
-### Option 3 — from source
+### Option 4 — from source
 
 ```bash
 git clone https://github.com/arizawan/vidlizer.git
@@ -439,7 +445,10 @@ Use vidlizer from any MCP-compatible agent — Claude Code, Cursor, Claude Deskt
 ### Install
 
 ```bash
-# pipx (recommended — isolated, globally available)
+# uvx (no install — run directly)
+uvx "vidlizer[mcp]" vidlizer-mcp
+
+# pipx (isolated, globally available)
 pipx install "vidlizer[mcp]"
 
 # If vidlizer is already installed via pipx — inject mcp into the same venv
