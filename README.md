@@ -472,6 +472,31 @@ Interactive wizard — detects `vidlizer-mcp`, reads your `.env`, and either wri
 
 ### Configure manually
 
+#### Quick start — uvx (no install required)
+
+No `pip install` or `pipx` needed. uvx downloads and runs vidlizer on the fly:
+
+```json
+{
+  "mcpServers": {
+    "vidlizer": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["--from", "vidlizer[mcp]", "vidlizer-mcp"],
+      "env": {
+        "PROVIDER": "ollama",
+        "OLLAMA_HOST": "http://localhost:11434",
+        "OLLAMA_MODEL": "gemma4:2b"
+      }
+    }
+  }
+}
+```
+
+Swap the `env` block for any provider (OpenRouter, LM Studio, oMLX) — the `command`/`args` stay the same.
+
+---
+
 Use the **absolute path** to the binary — `which vidlizer-mcp` gives it. All configs below use JSON (works in Claude Code, Cursor, Claude Desktop, Gemini CLI).
 
 For Claude Code via CLI:
